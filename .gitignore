@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build output
+dist/
+client/dist/
+server/dist/
+build/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# SECURITY (FT-008): NEVER un-ignore .env files. Only .env.example is tracked.
+# Real credentials live in AWS Secrets Manager + host env files only.
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime/cache
+.cache/
+.vite/
+.turbo/
+coverage/
+
+# Local databases and dumps
+*.sqlite
+*.sqlite3
+*.sql
+*.dump
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local verification screenshots/artifacts
+ui-*.png
+playwright-report/
+test-results/
+tests/e2e/.auth/
+
+# Backups and scratch output
+backups/
+*.bak
+*.tmp
+
+# Server debug log (dev only, must never be committed)
+server/server_debug.log
+~$*
+
+# FT-008/FT-001 forensic tool output — may contain tenant data, never commit
+forensic-ft001-report.json
+server/forensic-ft001-report.json

@@ -1,0 +1,43 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "migrate": "npx sequelize-cli db:migrate"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.1070.0",
+    "axios": "^1.15.2",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.1",
+    "express-validator": "^7.3.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.1",
+    "multer": "^2.1.1",
+    "mysql2": "^3.20.0",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.3",
+    "pdfkit": "^0.18.0",
+    "qrcode": "^1.5.4",
+    "sequelize": "^6.37.8",
+    "speakeasy": "^2.0.0",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "sequelize-cli": "^6.6.5"
+  }
+}
