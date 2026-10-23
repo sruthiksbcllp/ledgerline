@@ -16,7 +16,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const activityLog = require('../middleware/activityLog.middleware');
 
-const uploadsDir = path.join(__dirname, '..', 'uploads', 'invoices');
+const uploadsDir = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads'), 'invoices');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }

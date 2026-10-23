@@ -1,0 +1,66 @@
+# Render Blueprint for the LedgerLine API (server/). The client is deployed separately on Vercel
+# and MySQL is hosted on Aiven (Render has no managed MySQL).
+# Secrets are marked sync: false: Render asks for them when the Blueprint is created; they are
+# never stored in this file.
+services:
+  - type: web
+    name: ledgerline-api
+    runtime: node
+    plan: starter            # always on: the scheduler (reminders, SLA, alerts) needs a server that never sleeps
+    region: singapore
+    rootDir: server
+    buildCommand: npm ci
+    preDeployCommand: npm run migrate
+    startCommand: npm start
+    healthCheckPath: /health
+    numInstances: 1          # one instance only, or every scheduled job runs once per instance
+    disk:
+      name: uploads
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: TZ
+        value: Asia/Kolkata
+      # Client (Vercel) and API (Render) are different sites: the refresh cookie must be SameSite=None
+      - key: COOKIE_SAMESITE
+        value: none
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      # Aiven MySQL (TLS required; the CA is uploaded as the Secret File aiven-ca.pem)
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL
+        value: "true"
+      - key: DB_SSL_CA
+        value: /etc/secrets/aiven-ca.pem
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      # Must equal the local MAIL_CREDENTIALS_KEY, or saved mailbox connections can't be decrypted
+      - key: MAIL_CREDENTIALS_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_OAUTH_TENANT
+        sync: false
+      - key: OAUTH_REDIRECT_BASE_URL   # https://<this service>.onrender.com
+        sync: false
+      - key: CLIENT_URL                # https://<your app>.vercel.app
+        sync: false

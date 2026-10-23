@@ -30,6 +30,15 @@ const log = (msg) => {
   }
 };
 
+// 'strict' when the app and API share a site (local, single domain). Set COOKIE_SAMESITE=none when
+// the client is on another domain (e.g. Vercel + Render) so the refresh cookie is still sent;
+// 'none' is only valid with Secure, so it is ignored outside production.
+const REFRESH_COOKIE_SAMESITE = (() => {
+  const v = String(process.env.COOKIE_SAMESITE || 'strict').toLowerCase();
+  if (v === 'none' && process.env.NODE_ENV !== 'production') return 'strict';
+  return ['strict', 'lax', 'none'].includes(v) ? v : 'strict';
+})();
+
 const isMfaEnforced = () => String(process.env.MFA_ENFORCE_PRIVILEGED || 'false').toLowerCase() === 'true';
 const getRequestIp = (req) => req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || null;
 
@@ -208,7 +217,7 @@ exports.login = async (req, res) => {
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: REFRESH_COOKIE_SAMESITE,
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
@@ -348,7 +357,7 @@ exports.verifyMfa = async (req, res) => {
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: REFRESH_COOKIE_SAMESITE,
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
@@ -479,7 +488,7 @@ exports.completeMfaEnrollment = async (req, res) => {
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: REFRESH_COOKIE_SAMESITE,
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
@@ -591,7 +600,7 @@ exports.logout = async (req, res) => {
       // Revoke sessions
       await UserSession.update({ is_revoked: true }, { where: { user_id: id } });
     }
-    res.clearCookie('refreshToken');
+    res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: REFRESH_COOKIE_SAMESITE });
     ImmutableAuditService.log({
       clientId: req.user?.client_id,
       userId: req.user?.id,
@@ -645,7 +654,7 @@ exports.refreshToken = async (req, res) => {
     res.cookie('refreshToken', tokens.refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: REFRESH_COOKIE_SAMESITE,
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
