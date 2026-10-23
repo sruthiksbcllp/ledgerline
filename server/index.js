@@ -111,7 +111,10 @@ app.use(requestLogger);
 // Subdomain tenant resolver — runs before all routes so login is subdomain-aware
 const { subdomainTenantMiddleware } = require('./middleware/subdomainTenant.middleware');
 app.use(subdomainTenantMiddleware);
-app.use('/uploads', express.static(process.env.UPLOAD_DIR || path.join(__dirname, 'uploads')));
+// Local disk first, then the storage bucket (if configured). Also under /api/uploads, because the
+// client builds document links from VITE_API_URL, which ends in /api when the API is on its own domain.
+const { bucketFallback, uploadRoot } = require('./utils/fileStore');
+app.use(['/uploads', '/api/uploads'], express.static(uploadRoot()), bucketFallback);
 
 // Rate Limiting (Security Compliance)
 const getClientIp = (req) => {

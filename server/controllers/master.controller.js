@@ -812,6 +812,7 @@ exports.uploadVendorDocument = async (req, res) => {
     const vendor = await Vendor.findOne({ where: { id: req.params.id, ...buildWhere(req) } });
     if (!vendor) return error(res, 'Vendor not found', 404);
     const file = req.file;
+    await require('../utils/fileStore').persistUpload(file); // keep a copy in the bucket, if configured
     const expiryDate = req.body.expiry_date || null;
     const doc = await VendorDocument.create({
       client_id: req.user?.client_id || vendor.client_id,

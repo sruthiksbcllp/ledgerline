@@ -2115,6 +2115,7 @@ exports.uploadInvoiceDocument = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Please upload invoice file' });
     }
+    await require('../utils/fileStore').persistUpload(req.file); // keep a copy in the bucket, if configured
     const document_url = `/uploads/invoices/${req.file.filename}`;
     await invoice.update({ document_url });
     return res.status(200).json({ success: true, data: { id: invoice.id, document_url } });

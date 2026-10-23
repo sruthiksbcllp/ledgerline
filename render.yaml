@@ -6,18 +6,13 @@ services:
   - type: web
     name: ledgerline-api
     runtime: node
-    plan: starter            # always on: the scheduler (reminders, SLA, alerts) needs a server that never sleeps
+    plan: free               # sleeps after 15 min idle: keep it awake by pinging /health every 10 min (UptimeRobot / cron-job.org)
     region: singapore
     rootDir: server
     buildCommand: npm ci
-    preDeployCommand: npm run migrate
-    startCommand: npm start
+    startCommand: npm run migrate && npm start   # free plan has no pre-deploy step
     healthCheckPath: /health
     numInstances: 1          # one instance only, or every scheduled job runs once per instance
-    disk:
-      name: uploads
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -28,8 +23,17 @@ services:
       # Client (Vercel) and API (Render) are different sites: the refresh cookie must be SameSite=None
       - key: COOKIE_SAMESITE
         value: none
-      - key: UPLOAD_DIR
-        value: /var/data/uploads
+      # Free plan has no persistent disk: uploads are copied to Cloudflare R2 so they survive restarts
+      - key: STORAGE_BUCKET
+        sync: false
+      - key: STORAGE_ENDPOINT          # https://<account id>.r2.cloudflarestorage.com
+        sync: false
+      - key: STORAGE_REGION
+        value: auto
+      - key: STORAGE_ACCESS_KEY_ID
+        sync: false
+      - key: STORAGE_SECRET_ACCESS_KEY
+        sync: false
       # Aiven MySQL (TLS required; the CA is uploaded as the Secret File aiven-ca.pem)
       - key: DB_HOST
         sync: false
