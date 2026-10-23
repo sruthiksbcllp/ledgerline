@@ -1,0 +1,410 @@
+/* LedgerLine global theme */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+:root {
+  --bg: #F4F6FB;
+  --surface: #ffffff;
+  --surface-soft: #EEF1F8;
+  --text: #1E293B;
+  --text-dark: #0B1020;
+  --muted: #64748B;
+  --border: #E6EAF2;
+  --primary: #4F46E5;
+  --primary-hover: #4338CA;
+  --primary-gradient: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+  --success: #10B981;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --info: #3B82F6;
+  --purple: #8B5CF6;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-premium: 0 4px 20px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6,
+.ant-typography h1, .ant-typography h2, .ant-typography h3, .ant-typography h4, .ant-typography h5,
+.page-header-title, .ant-card-head-title, .ant-modal-title {
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif !important;
+  color: var(--text-dark);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+h1, .ant-typography h1 { font-size: 30px !important; }
+h2, .ant-typography h2, .page-header-title { font-size: 22px !important; }
+h3, .ant-typography h3, .ant-card-head-title, .ant-modal-title { font-size: 16px !important; }
+h4, .ant-typography h4 { font-size: 15px !important; }
+
+/* Aggressively enforce Inter font globally, except for icons */
+body, p, span, div, a, label, li, 
+.ant-typography:not(h1):not(h2):not(h3):not(h4):not(h5), 
+.ant-table, .ant-table-wrapper, .ant-menu, .ant-tabs, .ant-card, .ant-form, .ant-modal, .ant-drawer {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Explicitly exclude Ant Design icons from typography overrides to prevent broken icons */
+.anticon, .anticon *, .lucide, .lucide * {
+  font-family: inherit;
+}
+
+.ant-btn {
+  border-radius: var(--radius-md) !important;
+  font-weight: 700 !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  letter-spacing: 0.01em;
+}
+
+.ant-btn-primary {
+  background: var(--primary-gradient) !important;
+  border: none !important;
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.24) !important;
+}
+
+.ant-btn-primary:hover,
+.ant-btn-primary:focus-visible {
+  opacity: 0.96;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.32) !important;
+}
+
+#root .ant-input,
+#root .ant-input-number,
+#root .ant-picker,
+#root .ant-btn:not(.ant-btn-sm):not(.ant-btn-icon-only),
+#root .ant-select-single .ant-select-selector {
+  border-radius: var(--radius-md) !important;
+  border-color: var(--border) !important;
+  height: 40px !important;
+  
+  align-items: center !important;
+  font-size: 13px !important;
+}
+
+#root .ant-input-affix-wrapper {
+  border-radius: var(--radius-md) !important;
+  border-color: var(--border) !important;
+  height: 40px !important;
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+  background-color: #fff !important;
+}
+
+#root .ant-input-affix-wrapper .ant-input {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  height: 100% !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+#root .ant-select-multiple .ant-select-selector,
+#root .column-selector .ant-select-selector {
+  border-radius: var(--radius-md) !important;
+  border-color: var(--border) !important;
+  min-height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* Ensure search icon and text are aligned */
+#root .ant-input-affix-wrapper .ant-input-prefix {
+  margin-right: 8px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.ant-card {
+  border-radius: var(--radius-lg) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-premium) !important;
+}
+
+/* Cleanup legacy blocks to resolve conflicts with the new semantic system */
+.ant-btn-dangerous {
+  border-color: #f1b5b5 !important;
+  color: #c62828 !important;
+}
+
+.ant-btn-dangerous.ant-btn-primary {
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+  color: #fff !important;
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.2) !important;
+}
+
+.ant-btn-sm {
+  height: 36px !important;
+  padding-inline: 14px !important;
+  border-radius: 12px !important;
+}
+
+.ant-btn-lg {
+  height: 46px !important;
+  padding-inline: 22px !important;
+  border-radius: 14px !important;
+}
+
+.ant-btn.ant-btn-circle,
+.ant-btn.ant-btn-icon-only {
+  padding-inline: 0 !important;
+  box-shadow: none !important;
+}
+
+/* High-Fidelity Semantic Button System (Global Automation) */
+
+/* 1. Import Button — Soft Blue */
+#root .ant-btn:has(.lucide-upload), 
+#root .ant-btn:has(.anticon-upload),
+#root .btn-import {
+  background: #EFF6FF !important;
+  border: 1px solid #BFDBFE !important;
+  color: #2563EB !important;
+  font-weight: 700 !important;
+  transition: all 0.2s ease !important;
+}
+#root .ant-btn:has(.lucide-upload):hover,
+#root .ant-btn:has(.anticon-upload):hover,
+#root .btn-import:hover {
+  background: #DBEAFE !important;
+  border-color: #93C5FD !important;
+  transform: translateY(-1px);
+}
+
+/* 2. Export Button — Soft Green */
+#root .ant-btn:has(.lucide-download), 
+#root .ant-btn:has(.anticon-download),
+#root .btn-export {
+  background: #ECFDF5 !important;
+  border: 1px solid #A7F3D0 !important;
+  color: #059669 !important;
+  font-weight: 700 !important;
+  transition: all 0.2s ease !important;
+}
+#root .ant-btn:has(.lucide-download):hover,
+#root .ant-btn:has(.anticon-download):hover,
+#root .btn-export:hover {
+  background: #D1FAE5 !important;
+  border-color: #6EE7B7 !important;
+  transform: translateY(-1px);
+}
+
+/* 3. Refresh Button — Neutral Utility Gray */
+#root .ant-btn:has(.lucide-refresh-ccw), 
+#root .ant-btn:has(.anticon-reload),
+#root .btn-refresh {
+  background: #F8FAFC !important;
+  border: 1px solid #CBD5E1 !important;
+  color: #475569 !important;
+  font-weight: 700 !important;
+  transition: all 0.2s ease !important;
+}
+#root .ant-btn:has(.lucide-refresh-ccw):hover,
+#root .ant-btn:has(.anticon-reload):hover,
+#root .btn-refresh:hover {
+  background: #E2E8F0 !important;
+  border-color: #94A3B8 !important;
+  transform: translateY(-1px);
+}
+
+/* Page Header Components */
+.page-header-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--gradient-navy);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.page-header-icon svg {
+  display: block;
+}
+
+.page-header-title {
+  font-size: 24px !important;
+  font-weight: 800 !important;
+  color: #0F172A !important;
+  margin: 0 !important;
+  letter-spacing: -0.01em;
+}
+
+.page-header-sub {
+  font-size: 13px !important;
+  color: #64748B !important;
+  margin: 0 !important;
+}
+
+/* Table Action Circles (Matching Screenshot) */
+.ant-table-wrapper .ant-table-tbody .ant-btn.ant-btn-icon-only,
+.action-btn-circle {
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  border-radius: 50% !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: #ffffff !important;
+  border: 1.5px solid #E2E8F0 !important;
+  color: #64748B !important;
+  padding: 0 !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02) !important;
+}
+
+.ant-table-wrapper .ant-table-tbody .ant-btn.ant-btn-icon-only:hover {
+  background: #F8FAFC !important;
+  border-color: #CBD5E1 !important;
+  transform: scale(1.05) translateY(-1px) !important;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.06) !important;
+}
+
+/* Specific icon colors within table actions */
+.ant-table-wrapper .ant-table-tbody .ant-btn .lucide-eye, 
+.ant-table-wrapper .ant-table-tbody .ant-btn .anticon-eye { color: black; }
+.ant-table-wrapper .ant-table-tbody .ant-btn .lucide-pencil, 
+.ant-table-wrapper .ant-table-tbody .ant-btn .lucide-edit-2,
+.ant-table-wrapper .ant-table-tbody .ant-btn .anticon-edit { color: black; }
+.ant-table-wrapper .ant-table-tbody .ant-btn .lucide-trending-up,
+.ant-table-wrapper .ant-table-tbody .ant-btn .anticon-line-chart { color: #8B5CF6 !important; }
+.ant-table-wrapper .ant-table-tbody .ant-btn .lucide-trash-2,
+.ant-table-wrapper .ant-table-tbody .ant-btn .anticon-delete { color: #EF4444 !important; }
+.ant-table-wrapper .ant-table-tbody .ant-btn .lucide-key-round,
+.ant-table-wrapper .ant-table-tbody .ant-btn .anticon-key { color: #64748B !important; }
+
+/* Primary CTA Button */
+#root .btn-add-orange, 
+#root .ant-btn-primary:not(.ant-btn-dangerous) {
+  background: var(--primary-gradient) !important;
+  border: none !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  border-radius: 12px !important;
+  height: 40px !important;
+  padding: 0 20px !important;
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.24) !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-add-orange:hover,
+#root .ant-btn-primary:not(.ant-btn-dangerous):hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.32) !important;
+  opacity: 0.9 !important;
+}
+
+/* Sidebar active state — soft indigo pill on nested items */
+#root .ant-layout-sider .ant-menu.ant-menu-dark .ant-menu-sub .ant-menu-item-selected {
+  background: rgba(99, 102, 241, 0.28) !important;
+  color: #ffffff !important;
+  border-radius: 12px !important;
+  box-shadow: inset 3px 0 0 #A5B4FC !important;
+  font-weight: 700 !important;
+  margin: 4px 12px !important;
+  width: calc(100% - 24px) !important;
+}
+
+/* Force top-level items (like Monitoring Dashboard) to be transparent without block */
+#root .ant-layout-sider .ant-menu-root.ant-menu-dark > .ant-menu-item.ant-menu-item-selected,
+#root .ant-layout-sider .ant-menu.ant-menu-dark > .ant-menu-item.ant-menu-item-selected {
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+}
+
+.ant-layout-sider .ant-menu-submenu-selected .ant-menu-submenu-title {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+
+/* Tabs & Light Menus (Action Tabs) Override Default Blue */
+#root .ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #4F46E5 !important;
+  font-weight: 700 !important;
+}
+
+#root .ant-tabs .ant-tabs-ink-bar {
+  background: #4F46E5 !important;
+}
+
+#root .ant-tabs .ant-tabs-tab:hover {
+  color: #4F46E5 !important;
+}
+
+#root .ant-menu-light .ant-menu-item-selected,
+#root .ant-menu-light .ant-menu-item-active,
+#root .ant-menu-light .ant-menu-item:hover,
+#root .ant-menu-light .ant-menu-submenu-title:hover {
+  color: #4F46E5 !important;
+}
+
+#root .ant-menu-light .ant-menu-item-selected {
+  background-color: rgba(79, 70, 229, 0.1) !important;
+}
+
+#root .ant-menu-light .ant-menu-item-selected::after {
+  border-right-color: #4F46E5 !important;
+}
+
+#root .ant-menu-horizontal.ant-menu-light .ant-menu-item-selected::after,
+#root .ant-menu-horizontal.ant-menu-light .ant-menu-item:hover::after {
+  border-bottom-color: #4F46E5 !important;
+}
+
+/* Shell polish */
+.ant-layout-header {
+  backdrop-filter: blur(16px);
+}
+
+.ant-table-wrapper .ant-table {
+  border-radius: 16px;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  font-size: 11px !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700 !important;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: #F5F7FF !important;
+}
+
+.ant-modal-content,
+.ant-drawer-content {
+  border-radius: 20px !important;
+}
+
+.ant-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.page-header-title {
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  color: #0B1020 !important;
+  letter-spacing: -0.03em;
+}

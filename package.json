@@ -1,0 +1,29 @@
+{
+  "name": "fixtag-software",
+  "version": "1.0.0",
+  "description": "",
+  "main": "playwright.config.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/himavanthkumar225-coder/Fixtag.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/himavanthkumar225-coder/Fixtag/issues"
+  },
+  "homepage": "https://github.com/himavanthkumar225-coder/Fixtag#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
+}

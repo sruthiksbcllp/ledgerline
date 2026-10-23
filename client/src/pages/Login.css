@@ -1,0 +1,293 @@
+/* LedgerLine sign-in */
+
+.login-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(99, 102, 241, 0.16), transparent 42%),
+    radial-gradient(ellipse at 100% 100%, rgba(34, 211, 238, 0.14), transparent 40%),
+    #F4F6FB;
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  overflow: hidden;
+  padding: 28px;
+}
+
+.login-card {
+  display: flex;
+  width: 100%;
+  max-width: 1000px;
+  min-height: 600px;
+  background: #ffffff;
+  border-radius: 28px;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  overflow: hidden;
+  position: relative;
+  z-index: 10;
+}
+
+/* ── LEFT PANEL ── */
+.login-hero {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 48px 60px;
+  background: #0B1020;
+  color: #ffffff;
+  overflow: hidden;
+}
+
+.login-hero-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(129, 140, 248, 0.55), transparent 42%),
+    radial-gradient(circle at 82% 78%, rgba(34, 211, 238, 0.28), transparent 46%);
+  opacity: 1;
+  z-index: 0;
+}
+
+.login-hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(165deg, rgba(11, 16, 32, 0.15) 0%, rgba(11, 16, 32, 0.55) 100%);
+  z-index: 1;
+}
+
+.login-hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 520px;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.login-hero-logo {
+  margin-bottom: 48px;
+}
+
+.login-hero-sep {
+  width: 48px;
+  height: 4px;
+  background: #818CF8;
+  border-radius: 2px;
+  margin-bottom: 32px;
+}
+
+.login-hero-headline {
+  font-size: 36px !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+  color: #ffffff !important;
+  margin-bottom: 20px !important;
+}
+
+.login-hero-headline em {
+  font-style: normal;
+  color: #818CF8;
+}
+
+.login-hero-sub {
+  font-size: 15px !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  margin-bottom: 40px !important;
+  display: block;
+}
+
+.login-features {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-feature-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.login-feature-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(129, 140, 248, 0.16);
+  border: 1px solid rgba(165, 180, 252, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #A5B4FC;
+}
+
+.login-hero-badge {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 99px;
+  border: 1px solid rgba(255,255,255,0.1);
+  margin-top: 48px;
+  width: fit-content;
+}
+
+.login-hero-badge-dot {
+  width: 8px;
+  height: 8px;
+  background: #10B981;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #10B981;
+}
+
+.login-hero-badge-text {
+  font-size: 13px;
+  color: rgba(255,255,255,0.8);
+  font-weight: 500;
+}
+
+/* ── RIGHT PANEL ── */
+.login-form-panel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 60px;
+  background: #ffffff;
+  position: relative;
+}
+
+/* Specific top-right glow from screenshot */
+.login-form-panel::after {
+  content: '';
+  position: absolute;
+  top: -100px;
+  right: -100px;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.login-form-inner {
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-form-logo {
+  display: none; /* Already in hero, but visible on mobile */
+}
+
+.login-form-greeting {
+  color: #4F46E5;
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
+
+.login-form-title {
+  font-size: 32px !important;
+  font-weight: 800 !important;
+  color: #0F172A !important;
+  margin-bottom: 40px !important;
+}
+
+.login-form-panel .ant-form-item-label {
+  padding-bottom: 8px !important;
+}
+
+.login-form-panel .ant-form-item-label > label {
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  color: #64748b !important;
+}
+
+/* Ant Design native asterisk color */
+.login-form-panel .ant-form-item-required::before {
+  color: #4F46E5 !important;
+  font-size: 14px !important;
+  margin-right: 4px !important;
+}
+
+.login-form-panel .ant-input-affix-wrapper {
+  height: 52px !important;
+  background: #ffffff !important;
+  border: 1.5px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  padding-left: 14px !important;
+  padding-right: 14px !important;
+  display: flex !important;
+  align-items: center !important;
+  transition: all 0.2s ease;
+}
+
+/* NUCLEAR TRANSPARENCY: Remove any background from the inner native input */
+.login-form-panel .ant-input-affix-wrapper input.ant-input,
+.login-form-panel .ant-input-affix-wrapper .ant-input-password-input {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  height: 100% !important;
+  font-weight: 500 !important;
+  color: #1e293b !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.login-form-panel .ant-input-affix-wrapper-focused {
+  background: #ffffff !important;
+  border-color: #6366F1 !important;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.14) !important;
+}
+
+.login-form-panel .ant-input-prefix {
+  margin-right: 12px !important;
+  color: #94a3b8 !important;
+}
+
+.login-forgot-link {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #64748b !important;
+  padding: 0 !important;
+  height: auto !important;
+}
+
+.login-submit-btn {
+  height: 54px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%) !important;
+  border: none !important;
+  box-shadow: 0 10px 24px rgba(79, 70, 229, 0.28) !important;
+}
+
+.login-form-footer {
+  margin-top: 40px;
+  text-align: center;
+  color: #94A3B8;
+  font-size: 13px;
+}
+
+@media (max-width: 1024px) {
+  .login-hero {
+    display: none;
+  }
+  .login-form-logo {
+    display: block;
+    margin-bottom: 40px;
+    text-align: center;
+  }
+}
