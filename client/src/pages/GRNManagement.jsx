@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Card, Empty, Row, Space, Table, Tag, Typography, message, Modal, Descriptions } from 'antd';
 import { RefreshCcw, PackageCheck, Eye } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import GRNDrawer from '../components/procurement/GRNDrawer';
@@ -11,6 +12,7 @@ const { Title, Text } = Typography;
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
 
 const GRNManagement = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [approvedPOs, setApprovedPOs] = useState([]);
   const [grns, setGrns] = useState([]);
@@ -76,6 +78,21 @@ const GRNManagement = () => {
     { title: 'PO Number', key: 'po_number', render: (_, r) => r?.PurchaseOrder?.po_number || '-' },
     { title: 'Received Date', dataIndex: 'received_date', key: 'received_date', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '-') },
     { title: 'Status', dataIndex: 'status', key: 'status', render: (v) => <Tag color={String(v).toUpperCase() === 'RECEIVED' ? 'success' : 'default'}>{v || 'RECEIVED'}</Tag> },
+    {
+      title: 'Invoice Processing', key: 'invoice',
+      render: (_, r) => {
+        const inv = (r.Invoices || [])[0];
+        if (!inv) return <Text type="secondary">Not invoiced</Text>;
+        return (
+          <Space size={6}>
+            <Button type="link" size="small" style={{ paddingInline: 0 }} onClick={() => navigate('/procurement/invoices')}>{inv.invoice_number}</Button>
+            <Tag color={inv.matching_status === 'MISMATCHED' ? 'error' : inv.status === 'PAID' ? 'success' : 'processing'}>
+              {inv.matching_status === 'MISMATCHED' ? 'Match exception' : inv.status}
+            </Tag>
+          </Space>
+        );
+      }
+    },
     {
       title: 'Action', key: 'action', width: 90,
       render: (_, r) => (

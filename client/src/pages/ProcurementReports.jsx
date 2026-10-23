@@ -3,7 +3,7 @@ import {
   Table, Card, Tag, Space, DatePicker, Select,
   Row, Col, Typography, message, Button, Empty
 } from 'antd';
-import { FileText, Download, Filter } from 'lucide-react';
+import { FileText, Download, Filter, ClipboardList, ShoppingCart, PackageCheck, GitCompareArrows, Wrench, ChevronRight } from 'lucide-react';
 import api from '../utils/api';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -16,10 +16,18 @@ import PageHeader from '../components/PageHeader';
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
 
+const REPORT_TYPES = [
+  { value: 'PR', label: 'Purchase Requisition Report', description: 'All purchase requests with property, amount and approval status', icon: ClipboardList, color: '#2a78d6' },
+  { value: 'PO', label: 'Purchase Order Report', description: 'Purchase orders issued to vendors and where each one stands', icon: ShoppingCart, color: '#7c3aed' },
+  { value: 'GRN', label: 'GRN Report', description: 'Goods received against purchase orders', icon: PackageCheck, color: '#16a34a' },
+  { value: 'INVOICE', label: '3-Way Matching Report', description: 'Vendor invoices matched against PO and GRN, with exceptions', icon: GitCompareArrows, color: '#eb6834' },
+  { value: 'ISSUE', label: 'Asset Issue / Breakdown Report', description: 'Reported asset issues and breakdowns', icon: Wrench, color: '#dc2626' },
+];
+
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
 
 const ProcurementReports = () => {
-  const [reportType, setReportType] = useState('PR');
+  const [reportType, setReportType] = useState(null); // nothing is shown until a report is chosen
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
   const [settings, setSettings] = useState({ allow_excel_export: true, allow_pdf_export: true });
@@ -50,8 +58,9 @@ const ProcurementReports = () => {
     }
   };
 
+  useEffect(() => { fetchSettings(); }, []);
   useEffect(() => {
-    fetchSettings();
+    if (!reportType) { setData([]); return; }
     fetchData();
   }, [reportType]);
 
@@ -158,7 +167,7 @@ const ProcurementReports = () => {
           icon={<FileText size={16} />}
           title="Procurement Reports"
           subtitle="End-to-end traceability and 3-way matching reports"
-          actions={(
+          actions={reportType && (
             <Space>
               {settings.allow_excel_export && (
                 <Button className="btn-export" icon={<Download size={16} />} onClick={exportExcel}>Export Excel</Button>
@@ -178,14 +187,12 @@ const ProcurementReports = () => {
                 style={{ width: '100%', marginTop: 8 }}
                 value={reportType}
                 onChange={setReportType}
+                placeholder="Select a report"
               >
-                <Select.Option value="PR">Purchase Requisition Report</Select.Option>
-                <Select.Option value="PO">Purchase Order Report</Select.Option>
-                <Select.Option value="GRN">GRN Report</Select.Option>
-                <Select.Option value="INVOICE">3-Way Matching Report</Select.Option>
-                <Select.Option value="ISSUE">Asset Issue / Breakdown Report</Select.Option>
+                {REPORT_TYPES.map((t) => <Select.Option key={t.value} value={t.value}>{t.label}</Select.Option>)}
               </Select>
             </Col>
+            {reportType && (<>
             <Col span={8}>
               <Text strong>Date Range</Text>
               <RangePicker style={{ width: '100%', marginTop: 8 }} />
@@ -201,10 +208,37 @@ const ProcurementReports = () => {
             <Col span={4}>
               <Button style={{ marginTop: 28, width: '100%' }} icon={<Filter size={16} />}>Filter</Button>
             </Col>
+            </>)}
           </Row>
         </Card>
 
-        <Card style={contentCard} styles={{ body: { padding: 0 } }}>
+        <Card style={contentCard} styles={{ body: { padding: reportType ? 0 : 20 } }}>
+          {!reportType ? (
+            <>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 14 }}>Choose a report to view its results</Text>
+              <Row gutter={[16, 16]}>
+                {REPORT_TYPES.map(({ value, label, description, icon: Icon, color }) => (
+                  <Col xs={24} sm={12} xl={8} key={value}>
+                    <Card
+                      hoverable
+                      onClick={() => setReportType(value)}
+                      style={{ height: '100%', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}
+                      styles={{ body: { padding: 18, display: 'flex', gap: 14, alignItems: 'flex-start' } }}
+                    >
+                      <span style={{ flex: 'none', width: 42, height: 42, borderRadius: 12, background: `${color}14`, color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon size={20} />
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Text strong style={{ display: 'block', marginBottom: 4 }}>{label}</Text>
+                        <Text type="secondary" style={{ fontSize: 13 }}>{description}</Text>
+                      </div>
+                      <ChevronRight size={18} color="var(--color-text-muted, #9ca3af)" style={{ flex: 'none', marginTop: 12 }} />
+                    </Card>
+                  </Col>
+                ))}
+              </Row>
+            </>
+          ) : (
           <Table
             columns={columns}
             locale={{ emptyText: 'No records found' }}
@@ -215,6 +249,7 @@ const ProcurementReports = () => {
             pagination={{ showSizeChanger: true, pageSizeOptions: ['10','25','50'], showTotal: (total) => `${total} records` }}
             scroll={{ x: 'max-content' }}
           />
+          )}
         </Card>
 
       </Space>

@@ -14,7 +14,9 @@ import {
   Select,
   Collapse,
   Alert,
+  notification,
 } from "antd";
+import { useNavigate } from "react-router-dom";
 import { 
   ShieldCheck, 
   AlertTriangle, 
@@ -35,6 +37,7 @@ const GRNDrawer = ({ open, onClose, po, onRefresh }) => {
   const [loading, setLoading] = useState(false);
   const [warnings, setWarnings] = useState([]);
   const [form] = Form.useForm();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (po && open) loadPOItems();
@@ -130,14 +133,32 @@ const GRNDrawer = ({ open, onClose, po, onRefresh }) => {
       const res = await api.post("/grn/create", payload);
       const resData = res.data?.data || res.data;
 
-      if (resData.warnings && resData.warnings.length > 0) {
-        setWarnings(resData.warnings);
-        message.warning("GRN Created with 3-Way Match warnings");
-      } else {
-        message.success("Enterprise GRN Created Successfully");
-        onRefresh && onRefresh();
-        onClose();
-      }
+      // The GRN is saved either way, so close the drawer (a resubmit would create a second GRN)
+      // and report the hand-off to Invoice Processing plus any 3-way match warnings.
+      const grnWarnings = resData.warnings || [];
+      const invoice = resData.invoice;
+      const key = `grn-${resData.grn?.id || Date.now()}`;
+      notification[grnWarnings.length ? "warning" : "success"]({
+        key,
+        duration: grnWarnings.length ? 0 : 8,
+        message: `GRN ${resData.grn?.grn_number || ""} created`,
+        description: (
+          <Space direction="vertical" size={6}>
+            {invoice
+              ? <Text>Invoice <Text strong>{invoice.invoice_number}</Text> moved to Invoice Processing{invoice.matching_status === "MISMATCHED" ? " with a 3-way match exception" : ""}.</Text>
+              : <Text>Enter the vendor invoice in Invoice Processing.</Text>}
+            {grnWarnings.length > 0 && <ul style={{ margin: 0, paddingLeft: 18 }}>{grnWarnings.map((w, idx) => <li key={idx}>{w}</li>)}</ul>}
+          </Space>
+        ),
+        btn: (
+          <Button type="primary" size="small" onClick={() => { notification.destroy(key); navigate("/procurement/invoices"); }}>
+            Open Invoice Processing
+          </Button>
+        ),
+      });
+      setWarnings([]);
+      onRefresh && onRefresh();
+      onClose();
     } catch (err) {
       message.error(err?.response?.data?.message || err.message || "GRN creation failed");
     } finally {

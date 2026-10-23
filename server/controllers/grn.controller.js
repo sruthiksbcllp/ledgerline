@@ -69,6 +69,38 @@ exports.getGRNById = async (req, res, next) => {
   }
 };
 
+/**
+ * Hands a new GRN to Invoice Processing: creates the vendor invoice (the invoice number captured
+ * on the GRN, valued at accepted qty x PO price) and runs the usual 3-way match on it. Never fails
+ * the GRN; problems come back as warnings so the invoice can still be entered by hand.
+ */
+async function invoiceFromGrn({ req, po, grn, invoice_number, acceptedValue, warnings }) {
+  const number = String(invoice_number || '').trim();
+  if (!number || !(acceptedValue > 0)) return null;
+  try {
+    const { Invoice } = require('../models');
+    const existing = await Invoice.findOne({ where: { invoice_number: number, client_id: grn.client_id } });
+    if (existing) {
+      warnings.push(`Invoice ${number} is already in Invoice Processing, so no new invoice was created for this GRN.`);
+      return null;
+    }
+    const { recordInvoice } = require('./procurement.controller');
+    const { invoice } = await recordInvoice({
+      po_id: po.id,
+      grn_id: grn.id,
+      vendor_id: po.vendor_id,
+      invoice_number: number,
+      base_amount: Math.round(acceptedValue * 100) / 100,
+      gst_amount: 0,
+      invoice_date: grn.received_date
+    }, req);
+    return invoice;
+  } catch (err) {
+    warnings.push(`GRN saved, but the invoice could not be moved to Invoice Processing automatically: ${err.message}`);
+    return null;
+  }
+}
+
 exports.createGRN = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
@@ -96,6 +128,7 @@ exports.createGRN = async (req, res, next) => {
     }, { transaction });
 
     let warnings = [];
+    let acceptedValue = 0; // accepted qty x PO price: the amount the auto-created invoice is raised for
 
     for (let incomingItem of items) {
       const {
@@ -160,6 +193,7 @@ exports.createGRN = async (req, res, next) => {
       }
 
       await poItem.increment('received_quantity', { by: finalAccepted, transaction });
+      acceptedValue += Number(finalAccepted) * Number(poItem.unit_price || 0);
 
       const itemMaster = poItem.item_id ? await Item.findByPk(poItem.item_id) : null;
       // Create fixed assets when the item master is a fixed-asset/categorised item, OR when the
@@ -252,7 +286,11 @@ exports.createGRN = async (req, res, next) => {
       }
     } catch { /* GL posting is non-blocking */ }
 
-    sendResponse(res, 201, { grn, warnings }, 'GRN created successfully');
+    const invoice = await invoiceFromGrn({ req, po, grn, invoice_number, acceptedValue, warnings });
+
+    sendResponse(res, 201, { grn, warnings, invoice }, invoice
+      ? `GRN created successfully. Invoice ${invoice.invoice_number} moved to Invoice Processing`
+      : 'GRN created successfully');
   } catch (error) {
     if (transaction && !transaction.finished) await transaction.rollback();
     next(error);

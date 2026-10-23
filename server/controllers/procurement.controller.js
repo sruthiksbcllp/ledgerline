@@ -1000,7 +1000,8 @@ exports.getGRNs = async (req, res, next) => {
       include: [
         { model: PurchaseOrder, attributes: ['id', 'po_number', 'property_id'] },
         { model: Property, attributes: ['id', 'property_name'] },
-        { model: Location, attributes: ['id', 'location_name'], required: false }
+        { model: Location, attributes: ['id', 'location_name'], required: false },
+        { model: Invoice, attributes: ['id', 'invoice_number', 'status', 'matching_status'], required: false }
       ],
       order: [['createdAt', 'DESC']]
     });
@@ -1318,11 +1319,28 @@ function matchToInvoiceFields(match) {
 
 exports.createInvoice = async (req, res, next) => {
   try {
+    const { invoice, match } = await recordInvoice(req.body, req);
+    return success(res, invoice, match.matched ? 'Invoice processed and 3-Way Match verified' : 'Invoice logged with Match Exception and payment blocked');
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({ success: false, message: error.message || "Something went wrong" });
+  }
+};
+
+/**
+ * Creates an invoice in Invoice Processing (duplicate block, 3-way match, GST/TDS, CWIP,
+ * Tally sync, audit). Shared by the Invoice Processing form and GRN creation.
+ * `body` holds the invoice fields; `req` supplies the acting user and tenant.
+ */
+async function recordInvoice(body, req) {
+  {
     const {
       po_id, grn_id,
       invoice_number, base_amount, gst_amount, property_id,
       hsn_sac_code, is_itc_eligible
-    } = req.body;
+    } = body;
     const requestedClientId = getClientId(req);
 
     if (!po_id) throw new AppError('PO is required', 400);
@@ -1344,7 +1362,7 @@ exports.createInvoice = async (req, res, next) => {
       throw new AppError('Selected PO does not belong to your tenant', 403);
     }
 
-    const vendor_id = req.body.vendor_id || po.vendor_id;
+    const vendor_id = body.vendor_id || po.vendor_id;
     const resolvedPropertyId = property_id || po.property_id;
 
     // 1. Strict Rule: Duplicate Invoice Block (only by invoice_number)
@@ -1373,7 +1391,7 @@ exports.createInvoice = async (req, res, next) => {
 
     // 2. 3-Way Match Validation (only when GRN is provided)
     const { validate3WayMatch } = require('../utils/finance');
-    const tolerancePercent = Number(req.body.tolerance_percent ?? process.env.THREE_WAY_AMOUNT_TOLERANCE_PCT ?? 5);
+    const tolerancePercent = Number(body.tolerance_percent ?? process.env.THREE_WAY_AMOUNT_TOLERANCE_PCT ?? 5);
     const match = grn_id
       ? await validate3WayMatch(po_id, grn_id, total_amount, {
           amountPercent: tolerancePercent,
@@ -1430,8 +1448,8 @@ exports.createInvoice = async (req, res, next) => {
       tds_section_code: vendor.tds_section_code || null,
       hsn_sac_code: hsn_sac_code || null,
       itc_eligible: Boolean(is_itc_eligible),
-      document_url: req.body.document_url || null,
-      invoice_date: req.body.invoice_date || new Date(),
+      document_url: body.document_url || null,
+      invoice_date: body.invoice_date || new Date(),
       status: match.matched ? 'UNPAID' : 'EXCEPTION',
       matching_status: match.matched ? 'MATCHED' : 'MISMATCHED',
       matching_exception_details: match.matched ? null : match.error,
@@ -1509,14 +1527,10 @@ exports.createInvoice = async (req, res, next) => {
       afterData: invoice.toJSON(),
       req
     });
-    return success(res, invoice, match.matched ? 'Invoice processed and 3-Way Match verified' : 'Invoice logged with Match Exception and payment blocked');
-  } catch (error) {
-    if (error instanceof AppError) {
-      return res.status(error.statusCode).json({ success: false, message: error.message });
-    }
-    return res.status(500).json({ success: false, message: error.message || "Something went wrong" });
+    return { invoice, match };
   }
-};
+}
+exports.recordInvoice = recordInvoice;
 
 exports.resolveInvoiceException = async (req, res, next) => {
   try {
