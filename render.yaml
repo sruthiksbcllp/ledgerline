@@ -34,7 +34,7 @@ services:
         sync: false
       - key: STORAGE_SECRET_ACCESS_KEY
         sync: false
-      # Aiven MySQL (TLS required; the CA is uploaded as the Secret File aiven-ca.pem)
+      # Aiven MySQL (TLS required). The CA is the Aiven project certificate in server/certs (public, not a secret)
       - key: DB_HOST
         sync: false
       - key: DB_PORT
@@ -48,7 +48,7 @@ services:
       - key: DB_SSL
         value: "true"
       - key: DB_SSL_CA
-        value: /etc/secrets/aiven-ca.pem
+        value: certs/aiven-ca.pem
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
