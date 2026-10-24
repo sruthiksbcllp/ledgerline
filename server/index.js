@@ -176,6 +176,7 @@ app.use('/api/system/activity-logs', require('./routes/activity_logs.routes'));
 app.use('/api/system/features',       require('./routes/features.routes'));
 app.use('/api/system', systemRoutes);
 app.use('/api/companies', companyRoutes);
+app.use('/api/company-access', require('./routes/companyAccess.routes'));
 
 // Asset Management (Primary)
 

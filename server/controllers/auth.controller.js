@@ -44,7 +44,9 @@ const getRequestIp = (req) => req.ip || req.connection?.remoteAddress || req.soc
 
 const persistRefreshSession = async (user, refreshTokenHash, req, context) => {
   user.refresh_token_hash = refreshTokenHash;
-  await user.save();
+  // Only this column: the session's company/role are set on the instance for token signing and
+  // must never be written back to the account.
+  await user.save({ fields: ['refresh_token_hash'] });
 
   try {
     await UserSession.create({
@@ -64,13 +66,21 @@ const persistRefreshSession = async (user, refreshTokenHash, req, context) => {
   }
 };
 
+/**
+ * opts.ctx is the session's company context from companyAccess.resolveContext:
+ * { client_id, role, cid, pa }. The refresh token remembers the company so a renewed session stays
+ * in it (and loses it if access was removed).
+ */
 const generateTokens = (user, opts = {}) => {
   const mfaVerified = Boolean(opts.mfa_verified);
+  const ctx = opts.ctx || { client_id: user.client_id, role: user.role };
   const accessToken = jwt.sign(
     {
       id: user.id,
-      role: user.role,
-      client_id: user.client_id,
+      role: ctx.role,
+      client_id: ctx.client_id ?? null,
+      ...(ctx.cid ? { cid: ctx.cid } : {}),
+      ...(ctx.pa ? { pa: true } : {}),
       mfa_verified: mfaVerified
     },
     process.env.JWT_SECRET,
@@ -78,13 +88,56 @@ const generateTokens = (user, opts = {}) => {
   );
 
   const refreshToken = jwt.sign(
-    { id: user.id },
+    { id: user.id, ...(ctx.cid ? { cid: ctx.cid } : {}), ...(ctx.pa ? { pa: true } : {}) },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: '7d' }
   );
 
   return { accessToken, refreshToken };
 };
+
+const companyAccess = () => require('../services/companyAccess.service');
+
+/** The user object the client stores for a session. */
+const sessionUser = (user, accountRole, ctx) => {
+  const access = companyAccess();
+  const superAdmin = access.isPlatformRole(accountRole);
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    role: ctx.role,
+    client_id: ctx.client_id ?? null,
+    client_name: ctx.company?.client_name || null,
+    account_role: accountRole,
+    is_super_admin: superAdmin,
+    platform_view: superAdmin && !ctx.pa,
+    ...access.tierInfo(superAdmin ? 'PROVIDER_ADMIN' : ctx.role)
+  };
+};
+
+/** Signs tokens for a context, stores the refresh session and sets the cookie. Returns the access token. */
+const startSession = async (req, res, user, ctx, mfaVerified, context) => {
+  const { accessToken, refreshToken } = generateTokens(user, { mfa_verified: mfaVerified, ctx });
+  await persistRefreshSession(user, await bcrypt.hash(refreshToken, 10), req, context);
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: REFRESH_COOKIE_SAMESITE,
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
+  return accessToken;
+};
+
+const loadUserWithRoles = (where) => User.findOne({
+  where,
+  include: [
+    { model: Role, as: 'Role' },
+    { model: Role, as: 'Roles', through: { attributes: [] } }
+  ]
+});
 
 const generateMfaSetupToken = (user) => {
   return jwt.sign(
@@ -209,17 +262,11 @@ exports.login = async (req, res) => {
     const bypass = String(process.env.MFA_BOOTSTRAP_BYPASS || 'false').toLowerCase() === 'true';
     const mfaVerified = !requiresMfa || bypass;
 
-    const { accessToken, refreshToken } = generateTokens(user, { mfa_verified: mfaVerified });
-
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-    await persistRefreshSession(user, refreshTokenHash, req, 'login');
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: REFRESH_COOKIE_SAMESITE,
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    // The session starts in the user's default company (last used, else home); the client then shows
+    // the company picker so they can confirm or switch. accountRole is the role on the account itself.
+    const accountRole = user.role;
+    const ctx = await companyAccess().resolveContext(user, accountRole, null);
+    const accessToken = await startSession(req, res, user, ctx, mfaVerified, 'login');
 
     // Activity Log
     try {
@@ -286,12 +333,7 @@ exports.login = async (req, res) => {
       mfa_setup_required: mfaSetupRequired,
       mfa_method: 'totp',
       setup_token: setupToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.Role ? user.Role.code : (user.Roles && user.Roles.length > 0 ? user.Roles[0].code : 'REQUESTER'),
-        client_id: user.client_id
-      }
+      user: sessionUser(user, accountRole, ctx)
     });
 
   } catch (error) {
@@ -348,18 +390,11 @@ exports.verifyMfa = async (req, res) => {
     mfaAttemptTracker.delete(key);
 
     user.role = user.Role ? user.Role.code : (user.Roles && user.Roles.length > 0 ? user.Roles[0].code : 'REQUESTER');
-    const { accessToken, refreshToken } = generateTokens(user, { mfa_verified: true });
-
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+    const accountRole = user.role;
     user.mfa_last_verified_at = new Date();
-    await persistRefreshSession(user, refreshTokenHash, req, 'verifyMfa');
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: REFRESH_COOKIE_SAMESITE,
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    await user.save({ fields: ['mfa_last_verified_at'] });
+    const ctx = await companyAccess().resolveContext(user, accountRole, null);
+    const accessToken = await startSession(req, res, user, ctx, true, 'verifyMfa');
 
     ImmutableAuditService.log({
       clientId: user.client_id,
@@ -371,15 +406,7 @@ exports.verifyMfa = async (req, res) => {
       afterData: { username: user.username, role: user.role },
       req
     });
-    return sendSuccess(res, {
-      token: accessToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        client_id: user.client_id
-      }
-    }, 'MFA verified');
+    return sendSuccess(res, { token: accessToken, user: sessionUser(user, accountRole, ctx) }, 'MFA verified');
   } catch (error) {
     return sendError(res, error.message || 'MFA verification failed', 500);
   }
@@ -480,27 +507,11 @@ exports.completeMfaEnrollment = async (req, res) => {
     await user.save();
 
     user.role = user.Role ? user.Role.code : (user.Roles && user.Roles.length > 0 ? user.Roles[0].code : 'REQUESTER');
-    const { accessToken, refreshToken } = generateTokens(user, { mfa_verified: true });
+    const accountRole = user.role;
+    const ctx = await companyAccess().resolveContext(user, accountRole, null);
+    const accessToken = await startSession(req, res, user, ctx, true, 'completeMfaEnrollment');
 
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-    await persistRefreshSession(user, refreshTokenHash, req, 'completeMfaEnrollment');
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: REFRESH_COOKIE_SAMESITE,
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    return sendSuccess(res, {
-      token: accessToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        client_id: user.client_id
-      }
-    }, 'MFA enrollment completed');
+    return sendSuccess(res, { token: accessToken, user: sessionUser(user, accountRole, ctx) }, 'MFA enrollment completed');
   } catch (error) {
     return sendError(res, error.message || 'Failed to complete MFA enrollment', 400);
   }
@@ -646,19 +657,25 @@ exports.refreshToken = async (req, res) => {
     }
 
     user.role = user.Role ? user.Role.code : (user.Roles && user.Roles.length > 0 ? user.Roles[0].code : 'REQUESTER');
-    const tokens = generateTokens(user);
+    const accountRole = user.role;
+    // Stay in the company this session was in. If access to it was removed, the renewed session has
+    // no company, and the client sends the user back to the company picker (never silently into
+    // another company).
+    const access = companyAccess();
+    let ctx;
+    if (decoded.cid || decoded.pa) {
+      try {
+        ctx = await access.resolveContext(user, accountRole, decoded.cid || null);
+      } catch (e) {
+        if (!(e instanceof access.AccessError)) throw e;
+        ctx = { client_id: null, role: accountRole, cid: null, pa: false, company: null };
+      }
+    } else {
+      ctx = await access.resolveContext(user, accountRole, null);
+    }
+    const accessToken = await startSession(req, res, user, ctx, false, 'refreshToken');
 
-    const newRefreshHash = await bcrypt.hash(tokens.refreshToken, 10);
-    await persistRefreshSession(user, newRefreshHash, req, 'refreshToken');
-
-    res.cookie('refreshToken', tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: REFRESH_COOKIE_SAMESITE,
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    return sendSuccess(res, { accessToken: tokens.accessToken });
+    return sendSuccess(res, { accessToken, user: sessionUser(user, accountRole, ctx) });
   } catch (error) {
     return res.status(401).json({ success: false, message: 'Session expired' });
   }
@@ -976,16 +993,15 @@ exports.register = async (req, res) => {
 
     const result = await sequelize.transaction(async (transaction) => {
       const { client, created } = await resolveSignupCompany(email, transaction);
-      // The first person from a company becomes its Admin. People joining an existing
-      // company cannot grant themselves Admin; an existing Admin must do that.
-      let roleCode = requested.code;
-      if (created) {
-        roleCode = 'ADMIN';
-      } else if (roleCode === 'ADMIN') {
+      // The first person from a company becomes its Company Admin. Someone signing up with the
+      // domain of an existing company does NOT get in automatically: their account is created and a
+      // request to join is sent to that company's admins, who choose the role when they approve.
+      if (!created && requested.code === 'ADMIN') {
         const err = new Error('Your company already exists. Admin access must be granted by your company admin, so choose another role.');
         err.status = 403;
         throw err;
       }
+      const roleCode = created ? 'ADMIN' : 'REQUESTER';
       const role = await Role.findOne({ where: { code: roleCode }, transaction });
       if (!role) {
         const err = new Error('That role is not available yet');
@@ -1005,26 +1021,128 @@ exports.register = async (req, res) => {
         user_level: 'Level 1'
       }, { transaction });
       if (user.setRoles) await user.setRoles([role.id], { transaction });
+      await companyAccess().upsertMembership(
+        user.id, client.id,
+        created ? 'ADMIN' : requested.code,
+        created ? 'ACTIVE' : 'PENDING',
+        created ? {} : { requested_role: requested.code, request_note: 'Signed up with the company email domain' },
+        transaction
+      );
       return { user, role, client, created };
     });
 
     const { user, role, client, created } = result;
     const message = created
-      ? `Account created. You are the Admin of ${client.client_name}. Sign in with your username.`
-      : `Account created. You joined ${client.client_name}. Sign in with your username.`;
+      ? `Account created. You are the Company Admin of ${client.client_name}. Sign in with your username.`
+      : `Account created. Your request to join ${client.client_name} was sent to its admins. Sign in to check its status.`;
     return res.status(201).json({
       success: true,
       message,
       data: {
         id: user.id,
         username: user.username,
-        role: role.code,
+        role: created ? 'ADMIN' : requested.code,
         client_id: client.id,
         company_name: client.client_name,
-        company_created: created
+        company_created: created,
+        access_status: created ? 'ACTIVE' : 'PENDING'
       }
     });
   } catch (error) {
     return sendError(res, error.message || 'Registration failed', error.status || 400);
+  }
+};
+
+// ── Company picker (multi-company access) ─────────────────────────────────────────────────────
+
+const sendAccessError = (res, error, fallback) => {
+  const access = companyAccess();
+  if (error instanceof access.AccessError) return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+  return sendError(res, error.message || fallback, 500);
+};
+
+const currentAccountUser = async (req) => {
+  const user = await loadUserWithRoles({ id: req.user.id, status: 'ACTIVE' });
+  if (!user) {
+    const access = companyAccess();
+    throw new access.AccessError('Your account is not active.', 401, 'ACCOUNT_INACTIVE');
+  }
+  user.role = companyAccess().accountRoleOf(user);
+  return user;
+};
+
+/** GET /auth/workspaces: companies the user can enter, requests waiting, and companies they may ask to join. */
+exports.listWorkspaces = async (req, res) => {
+  try {
+    const user = await currentAccountUser(req);
+    const data = await companyAccess().listWorkspaces(user, user.role, req.user.client_id ?? null);
+    return sendSuccess(res, { ...data, requestable_roles: companyAccess().requestableRoles(), email: user.email });
+  } catch (error) {
+    return sendAccessError(res, error, 'Could not load your companies');
+  }
+};
+
+/**
+ * POST /auth/workspaces/:clientId/enter: binds the session to a company the user may access.
+ * Super Admins may also pass "platform" for the cross-company platform view.
+ */
+exports.enterWorkspace = async (req, res) => {
+  try {
+    const user = await currentAccountUser(req);
+    const access = companyAccess();
+    const raw = String(req.params.clientId || '');
+    let preferred = null;
+    if (raw === 'platform') {
+      if (!access.isPlatformRole(user.role)) throw new access.AccessError('Only a Super Admin has a platform view.', 403, 'NOT_SUPER_ADMIN');
+    } else {
+      preferred = Number(raw);
+      if (!Number.isInteger(preferred) || preferred <= 0) throw new access.AccessError('Choose a company.', 400, 'BAD_COMPANY');
+    }
+    const ctx = await access.resolveContext(user, user.role, preferred);
+    // Switching company never upgrades MFA: the new session keeps this session's MFA state.
+    const accessToken = await startSession(req, res, user, ctx, Boolean(req.user.mfa_verified), 'enterWorkspace');
+    await access.markUsed(user.id, ctx.cid && !ctx.pa ? ctx.cid : null);
+    ImmutableAuditService.log({
+      clientId: ctx.client_id,
+      userId: user.id,
+      action: 'ENTER_COMPANY',
+      module: 'AUTH',
+      entityType: 'CLIENT',
+      entityId: ctx.client_id,
+      afterData: { role: ctx.role, platform_admin: Boolean(ctx.pa), platform_view: raw === 'platform' },
+      req
+    });
+    return sendSuccess(res, { token: accessToken, user: sessionUser(user, user.role, ctx) }, ctx.company ? `Opened ${ctx.company.client_name}` : 'Opened platform view');
+  } catch (error) {
+    return sendAccessError(res, error, 'Could not open that company');
+  }
+};
+
+/** POST /auth/workspaces/:clientId/request: ask to join a company on the user's email domain. */
+exports.requestWorkspaceAccess = async (req, res) => {
+  try {
+    const user = await currentAccountUser(req);
+    const { company } = await companyAccess().requestAccess(user, Number(req.params.clientId), {
+      note: req.body?.note,
+      requestedRole: req.body?.role
+    });
+    ImmutableAuditService.log({
+      clientId: company.id, userId: user.id, action: 'REQUEST_COMPANY_ACCESS', module: 'AUTH',
+      entityType: 'CLIENT', entityId: company.id, afterData: { requested_role: req.body?.role || null }, req
+    });
+    return sendSuccess(res, { client_id: company.id }, `Request sent. A ${company.client_name} admin will review it.`);
+  } catch (error) {
+    return sendAccessError(res, error, 'Could not send the request');
+  }
+};
+
+/** DELETE /auth/workspaces/:clientId/request: withdraw one's own pending request. */
+exports.cancelWorkspaceRequest = async (req, res) => {
+  try {
+    const user = await currentAccountUser(req);
+    await companyAccess().cancelRequest(user, Number(req.params.clientId));
+    return sendSuccess(res, {}, 'Request withdrawn');
+  } catch (error) {
+    return sendAccessError(res, error, 'Could not withdraw the request');
   }
 };

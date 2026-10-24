@@ -192,6 +192,7 @@ exports.createUser = async (req, res) => {
     });
 
     if (user.setRoles) await user.setRoles([normalizedRoleId]);
+    await require('../services/companyAccess.service').syncFromUsersScreen(user.id, user.client_id, role.code);
 
     recordAdminAction(req, {
       action: 'USER_CREATED',
@@ -346,6 +347,14 @@ exports.updateUser = async (req, res) => {
     if (hasRoleInPayload && user.setRoles) {
       await user.setRoles([normalizedRoleId]);
     }
+    {
+      const access = require('../services/companyAccess.service');
+      if (hasRoleInPayload) {
+        const newRole = await Role.findByPk(normalizedRoleId, { attributes: ['code'] });
+        await access.syncFromUsersScreen(user.id, user.client_id, newRole?.code);
+      }
+      access.invalidate(user.id); // status or role changes apply to open sessions right away
+    }
     recordAdminAction(req, {
       action: previousStatus !== user.status ? 'USER_STATUS_CHANGED' : (previousRoleId !== user.role_id ? 'USER_ROLE_CHANGED' : 'USER_UPDATED'),
       module: 'USER',
@@ -386,6 +395,7 @@ exports.deleteUser = async (req, res) => {
 
     // Soft delete — preserve FK references and audit trail
     await user.update({ status: 'INACTIVE' });
+    require('../services/companyAccess.service').invalidate(user.id);
     recordAdminAction(req, {
       action: 'USER_DEACTIVATED',
       module: 'USER',

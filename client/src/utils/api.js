@@ -145,6 +145,29 @@ api.interceptors.response.use(
         }
 
         setAuthToken(newToken);
+        // The renewed session can differ from the stored one: a Company Admin changed this
+        // person's role, or removed them from the company. Never carry on silently in the old context.
+        const renewedUser = refreshRes?.data?.data?.user;
+        if (renewedUser && typeof window !== "undefined") {
+          let previous = null;
+          try { previous = JSON.parse(localStorage.getItem("user") || "null"); } catch { previous = null; }
+          localStorage.setItem("user", JSON.stringify(renewedUser));
+          if (renewedUser.client_name) localStorage.setItem("client_name", renewedUser.client_name);
+          const noWorkspace = !renewedUser.client_id && !renewedUser.platform_view;
+          const companyChanged = previous && Number(previous.client_id || 0) !== Number(renewedUser.client_id || 0);
+          const roleChanged = previous && String(previous.role || "") !== String(renewedUser.role || "");
+          if ((noWorkspace || companyChanged) && !window.location.pathname.startsWith("/select-company")) {
+            onRefreshed(null);
+            localStorage.removeItem("fixtag_company_id");
+            window.location.assign("/select-company?notice=access-changed");
+            return Promise.reject(error);
+          }
+          if (roleChanged) {
+            onRefreshed(null);
+            window.location.reload(); // menus and screens follow the new role
+            return Promise.reject(error);
+          }
+        }
         onRefreshed(newToken);
 
         original.headers = original.headers || {};

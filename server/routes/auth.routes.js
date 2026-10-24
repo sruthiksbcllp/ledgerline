@@ -27,4 +27,10 @@ router.get('/my-companies', verifyToken, asyncHandler(authController.getMyCompan
 router.get('/current-company', verifyToken, asyncHandler(authController.getCurrentCompany));
 router.post('/switch-company/:companyId', verifyToken, asyncHandler(authController.switchCompany));
 
+// Multi-company access: pick a company after login, ask to join one on your email domain.
+router.get('/workspaces', verifyToken, asyncHandler(authController.listWorkspaces));
+router.post('/workspaces/:clientId/enter', verifyToken, requireMfaForPrivileged, asyncHandler(authController.enterWorkspace));
+router.post('/workspaces/:clientId/request', verifyToken, authLimiter, asyncHandler(authController.requestWorkspaceAccess));
+router.delete('/workspaces/:clientId/request', verifyToken, asyncHandler(authController.cancelWorkspaceRequest));
+
 module.exports = router;

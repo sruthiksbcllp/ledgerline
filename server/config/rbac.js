@@ -22,6 +22,30 @@ const ROLES = [
   { code: 'VENDOR', name: 'Vendor', order: 12, level: 5, publicAssignable: true, description: 'View only this vendor’s orders, invoices, and payment status.' }
 ];
 
+/**
+ * The four access tiers people see (Super Admin, Company Admin, Manager, Employee). Each role code
+ * above belongs to one tier; the role code still decides the exact module permissions.
+ *   Super Admin   - platform owner: every company, company management (PROVIDER_ADMIN)
+ *   Company Admin - full control of one company, its members and access requests (ADMIN)
+ *   Manager       - approves and oversees work in the company (MANAGER, DIRECTOR_CFO, FINANCE, MANAGEMENT)
+ *   Employee      - does day-to-day work within their function (REQUESTER, PROCUREMENT, AP, ...)
+ */
+const TIERS = [
+  { code: 'SUPER_ADMIN', name: 'Super Admin', rank: 4, description: 'Owns the platform: every company and company management.' },
+  { code: 'COMPANY_ADMIN', name: 'Company Admin', rank: 3, description: 'Full control of this company, its members and access requests.' },
+  { code: 'MANAGER', name: 'Manager', rank: 2, description: 'Approves and oversees work in this company.' },
+  { code: 'EMPLOYEE', name: 'Employee', rank: 1, description: 'Day-to-day work within their function.' }
+];
+const TIER_OF_ROLE = {
+  PROVIDER_ADMIN: 'SUPER_ADMIN', DEV_ADMIN: 'SUPER_ADMIN',
+  ADMIN: 'COMPANY_ADMIN', SUPER_ADMIN: 'COMPANY_ADMIN', CLIENT_ADMIN: 'COMPANY_ADMIN',
+  MANAGER: 'MANAGER', DIRECTOR_CFO: 'MANAGER', FINANCE: 'MANAGER', MANAGEMENT: 'MANAGER'
+};
+/** Tier code for a role code; anything not listed is an Employee role. */
+const tierOf = (role) => TIER_OF_ROLE[String(role || '').toUpperCase().replace(/\s+/g, '_')] || 'EMPLOYEE';
+/** Role given to someone whose request to join is approved without choosing a role. */
+const DEFAULT_MEMBER_ROLE = 'REQUESTER';
+
 const limitFromEnv = (name) => {
   const raw = process.env[name];
   if (raw === undefined || raw === null || String(raw).trim() === '') return null;
@@ -176,5 +200,8 @@ module.exports = {
   orderedRoles,
   roleAllows,
   canAssignRole,
-  approvalLimitFor
+  approvalLimitFor,
+  TIERS,
+  tierOf,
+  DEFAULT_MEMBER_ROLE
 };

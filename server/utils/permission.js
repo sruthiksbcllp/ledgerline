@@ -1,4 +1,4 @@
-const { User, Role, Permission, RolePermission } = require('../models');
+const { Role, RolePermission } = require('../models');
 const { isPrivilegedRole } = require('./devRole');
 const { roleAllows } = require('../config/rbac');
 
@@ -26,42 +26,25 @@ const hasPermission = async (user, module, action) => {
   };
   const normalizedAction = normalizedActionMap[String(action || '').toLowerCase()] || String(action || '').toLowerCase();
 
-  // Fetch roles for the user (supporting both single role_id and user_roles mapping)
-  const userWithRoles = await User.findByPk(user.id, {
-    include: [{
-      model: Role,
-      as: 'Role',
-      include: [{ model: RolePermission, as: 'RolePermissions' }]
-    }, {
-      model: Role,
-      as: 'Roles',
-      through: { attributes: [] },
-      include: [{ model: RolePermission, as: 'RolePermissions' }]
-    }]
+  // Custom per-role grants (edited in Roles & Permissions) for the role of the company this session
+  // is in. Deliberately NOT the roles stored on the user account: someone can hold different roles
+  // in different companies, and their role in one company must never grant access in another.
+  if (!directCode) return false;
+  const role = await Role.findOne({
+    where: { code: String(directCode).toUpperCase() },
+    include: [{ model: RolePermission, as: 'RolePermissions' }]
   });
-
-  if (!userWithRoles) return false;
-
-  const roles = userWithRoles.Roles || (userWithRoles.Role ? [userWithRoles.Role] : []);
-
-  if (roles.some(r => isPrivilegedRole(r.code))) return true;
-
-  const roleCode = userWithRoles.Role?.code;
-  if (roleAllows(roleCode, module, action)) return true;
-
-  for (const role of roles) {
-    const rolePermissions = role.RolePermissions || [];
-    const match = rolePermissions.some(rp => 
-      rp.section === module && 
-      (
-        (normalizedAction === 'view' && rp.can_view) ||
-        (normalizedAction === 'add' && rp.can_add) ||
-        (normalizedAction === 'edit' && rp.can_edit) ||
-        (normalizedAction === 'delete' && rp.can_delete)
-      )
-    );
-    if (match) return true;
-  }
+  if (!role) return false;
+  const match = (role.RolePermissions || []).some(rp =>
+    rp.section === module &&
+    (
+      (normalizedAction === 'view' && rp.can_view) ||
+      (normalizedAction === 'add' && rp.can_add) ||
+      (normalizedAction === 'edit' && rp.can_edit) ||
+      (normalizedAction === 'delete' && rp.can_delete)
+    )
+  );
+  if (match) return true;
 
   return false;
 };

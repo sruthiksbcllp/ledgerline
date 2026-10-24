@@ -9,7 +9,7 @@ const clearSessionContext = () => {
 };
 
 const enrichUserWithClientName = async (token, user) => {
-  if (!token || !user?.id) return user;
+  if (!token || !user?.id || user.client_name || !user.client_id) return user;
   try {
     const response = await api.get(`/users/${user.id}`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -207,6 +207,12 @@ const authSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
+    // A new session for another company (company picker) or a renewed one.
+    sessionChanged: (state, action) => {
+      state.token = action.payload?.token || state.token;
+      state.user = action.payload?.user || state.user;
+      state.isAuthenticated = Boolean(state.token);
+    },
     clearMfaState: (state) => {
       state.mfaRequired = false;
       state.pendingUsername = null;
@@ -304,5 +310,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { clearError, clearMfaState } = authSlice.actions;
+export const { clearError, clearMfaState, sessionChanged } = authSlice.actions;
 export default authSlice.reducer;

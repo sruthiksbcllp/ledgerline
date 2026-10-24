@@ -120,7 +120,7 @@ const Login = () => {
     setLoading(true);
     const result = await dispatch(login(values));
     setLoading(false);
-    if (login.fulfilled.match(result) && !result.payload?.mfaRequired) navigate('/');
+    if (login.fulfilled.match(result) && !result.payload?.mfaRequired) navigate('/select-company');
   };
 
   const onMfaFinish = async (values) => {
@@ -132,7 +132,7 @@ const Login = () => {
     setMfaLoading(false);
     if (verifyMfa.fulfilled.match(result) || completeMfaEnrollment.fulfilled.match(result)) {
       localStorage.setItem('trusted_device', trustedDevice ? '1' : '0');
-      navigate('/');
+      navigate('/select-company');
       return;
     }
     const next = mfaAttempts + 1;
@@ -220,7 +220,7 @@ const Login = () => {
                     showIcon
                     style={{ marginBottom: 16 }}
                     message="Your company is already on LedgerLine"
-                    description="You will join it and see its shared data according to your role. Admin access is granted by your company admin."
+                    description="Your account is created and a request to join is sent to your company admin. Once they approve it (and confirm your role), the company appears when you sign in."
                   />
                 )}
                 {registerStartsCompany && (
@@ -230,8 +230,8 @@ const Login = () => {
                     style={{ marginBottom: 16 }}
                     message={registerCompany.public_domain ? 'You will get a private workspace' : 'You will create your company workspace'}
                     description={registerCompany.public_domain
-                      ? 'Personal email addresses are not shared with anyone else. You will be its Admin.'
-                      : 'You will be its Admin. Colleagues who sign up with the same email domain join automatically.'}
+                      ? 'Personal email addresses are not shared with anyone else. You will be its Company Admin.'
+                      : 'You will be its Company Admin. Colleagues who sign up with the same email domain send you a request to join, which you approve.'}
                   />
                 )}
                 <Form.Item name="username" label="Username" rules={[{ required: true, message: 'Choose a username' }]}>
@@ -241,7 +241,7 @@ const Login = () => {
                   <Input.Password placeholder="Password" />
                 </Form.Item>
                 {!registerStartsCompany && (
-                  <Form.Item name="role_code" label="Role" rules={[{ required: true, message: 'Select a role' }]}>
+                  <Form.Item name="role_code" label="Role you need" extra="Your company admin confirms the final role." rules={[{ required: true, message: 'Select a role' }]}>
                     <Select placeholder="Select a role" options={registerRoleOptions} />
                   </Form.Item>
                 )}

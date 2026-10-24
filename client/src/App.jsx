@@ -9,6 +9,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './components/MainLayout';
 // Lazy Load Pages
 const Login = lazy(() => import('./pages/Login'));
+const SelectCompany = lazy(() => import('./pages/SelectCompany'));
+const CompanyAccess = lazy(() => import('./pages/CompanyAccess'));
 const ManageUsers = lazy(() => import('./pages/ManageUsers'));
 const AddUser = lazy(() => import('./pages/AddUser'));
 const ManageRoles = lazy(() => import('./pages/ManageRoles'));
@@ -122,6 +124,10 @@ function App() {
           {/* DiagnosticLogin route removed — security risk (FT-008) */}
           <Route path="/logout" element={<Logout />} />
 
+          {/* After sign-in: choose the company to work in (signed in, no company needed yet) */}
+          <Route element={<ProtectedRoute requireWorkspace={false} />}>
+            <Route path="/select-company" element={<SelectCompany />} />
+          </Route>
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout><Outlet /></MainLayout>}>
                 <Route path="/" element={<RoleBasedHome />} />
@@ -230,6 +236,9 @@ function App() {
 
               {/* System */}
               <Route path="/admin/users" element={<ManageUsers />} />
+              <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'CLIENT_ADMIN', 'SUPER_ADMIN']} />}>
+                <Route path="/admin/company-access" element={<CompanyAccess />} />
+              </Route>
               <Route path="/admin/roles" element={<ManageRoles />} />
               <Route path="/admin/audit-logs" element={<AdminAuditLog />} />
               <Route path="/add-user" element={<AddUser />} />

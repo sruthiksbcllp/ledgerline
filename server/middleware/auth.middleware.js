@@ -54,11 +54,20 @@ exports.verifyToken = (req, res, next) => {
     }
 
     try {
+      // Sessions are bound to one company. Removing someone from it, changing their role there or
+      // deactivating their account ends that session within seconds (not at token expiry); the
+      // client then renews the session, which lands on the new role or back at the company picker.
+      const { sessionStillValid } = require('../services/companyAccess.service');
+      if (!(await sessionStillValid(decoded))) {
+        return res.status(401).json({ success: false, code: 'SESSION_CONTEXT_CHANGED', message: 'Your access to this company has changed. Please continue again.' });
+      }
+
       req.user = {
         id: decoded.id,
         client_id: decoded.client_id,
         role: decoded.role,
-        mfa_verified: Boolean(decoded.mfa_verified)
+        mfa_verified: Boolean(decoded.mfa_verified),
+        ...(decoded.pa ? { platform_admin: true } : {})
       };
       pinRequestTenant(req);
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../utils/api';
+import { TIER_STYLE } from '../utils/session';
 import { Layout, Menu, Button, Avatar, Space, Badge, Dropdown, Typography, Modal, Tooltip, message, ConfigProvider, Divider, Input } from 'antd';
 import {
   Activity, AlertCircle, AlertTriangle, ArrowRightLeft, ArrowUpDown,
@@ -127,6 +128,8 @@ const MainLayout = ({ children }) => {
   const { hasPermission } = usePermissions();
 
   const normalizedRole = String(user?.role || '').toUpperCase();
+  const isCompanyAdmin = ['ADMIN', 'CLIENT_ADMIN', 'SUPER_ADMIN'].includes(normalizedRole) && Boolean(user?.client_id);
+  const tierStyle = TIER_STYLE[user?.tier] || null;
   const isAdmin = normalizedRole === 'SUPER_ADMIN' || normalizedRole === 'CLIENT_ADMIN' || normalizedRole === 'PROVIDER_ADMIN' || normalizedRole === 'ADMIN' || normalizedRole === 'DEV_ADMIN';
 
   // ─── Role-based sidebar visibility ───
@@ -318,6 +321,7 @@ const MainLayout = ({ children }) => {
       label: 'Admin Panel',
       hidden: !isAdmin,
       children: [
+        { key: '/admin/company-access', label: 'Company Access', icon: <Building2 size={14} />, hidden: !isCompanyAdmin },
         { key: '/admin/users', label: 'User Management', icon: <User size={14} />, hidden: !canManageGovernance },
         { key: '/admin/roles', label: 'Role & Permissions', icon: <ShieldCheck size={14} />, hidden: !canManageGovernance },
         { key: '/admin/audit-logs', label: 'Audit Logs', icon: <FileText size={14} />, hidden: !canManageGovernance },
@@ -530,6 +534,10 @@ const MainLayout = ({ children }) => {
       navigate('/my-profile');
       return;
     }
+    if (action === 'switch-company') {
+      navigate('/select-company');
+      return;
+    }
     if (action === 'settings') {
       navigate('/security-settings');
       return;
@@ -551,6 +559,8 @@ const MainLayout = ({ children }) => {
   };
 
   const userMenuItems = [
+    { key: 'switch-company', icon: <ArrowRightLeft size={14} />, label: 'Switch company' },
+    { type: 'divider' },
     { key: 'profile', icon: <User size={14} />, label: 'My Profile' },
     { key: 'settings', icon: <Settings size={14} />, label: 'Security Settings' },
     ...(isAdmin ? [{ key: 'email-account', icon: <Mail size={14} />, label: 'Email account' }] : []),
@@ -669,6 +679,29 @@ const MainLayout = ({ children }) => {
           </div>
           
           <Space size={20}>
+            {/* The company this session is in; click to switch (data is fully separate per company). */}
+            <Tooltip title="Switch company">
+              <button
+                type="button"
+                onClick={() => navigate('/select-company')}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, maxWidth: 340, lineHeight: '18px', height: 38,
+                  padding: '6px 12px 6px 8px', borderRadius: 999, cursor: 'pointer',
+                  border: `1px solid ${dividerCol}`, background: 'transparent', color: navTextBold, font: 'inherit'
+                }}
+              >
+                <span style={{ width: 26, height: 26, lineHeight: '26px', borderRadius: 8, background: user?.platform_view ? '#7c3aed' : '#4F46E5', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+                  <Building2 size={14} />
+                </span>
+                <span style={{ display: 'inline-block', lineHeight: '18px', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {user?.platform_view ? 'Platform view' : (user?.client_name || 'Company')}
+                </span>
+                {tierStyle && (
+                  <span style={{ display: 'inline-block', lineHeight: '16px', fontSize: 11, fontWeight: 700, color: tierStyle.color, background: tierStyle.bg, padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>{tierStyle.label}</span>
+                )}
+                <ArrowRightLeft size={13} color={navText} style={{ flex: 'none' }} />
+              </button>
+            </Tooltip>
             <CompanySwitcher />
 
 
