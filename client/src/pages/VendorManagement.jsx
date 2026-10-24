@@ -3,6 +3,7 @@ import { Button, Card, Form, Input, Modal, Space, Table, Tag, message, Empty, Ro
 import { Plus, RefreshCcw, Trash2, Building2, Edit2, ShieldCheck, Tags, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
+import { getStoredUser, hasPerm } from '../utils/session';
 import { normalizeResponse } from '../utils/apiNormalizer';
 
 const { Title, Text } = Typography;
@@ -267,7 +268,7 @@ const VendorManagement = () => {
             <Badge count={pendingCount} offset={[-2, 0]}>
               <Button icon={<ShieldCheck size={16} />} onClick={() => navigate('/procurement/vendor-approvals')}>Approvals</Button>
             </Badge>
-            <Button icon={<Plus size={16} />} type="primary" onClick={openAdd}>Add Vendor</Button>
+            {hasPerm(getStoredUser(), 'VENDOR', 'ADD') && <Button icon={<Plus size={16} />} type="primary" onClick={openAdd}>Add Vendor</Button>}
           </Space>
         </Row>
       </Card>

@@ -114,8 +114,26 @@ const sessionUser = (user, accountRole, ctx) => {
     account_role: accountRole,
     is_super_admin: superAdmin,
     platform_view: superAdmin && !ctx.pa,
-    ...access.tierInfo(superAdmin ? 'PROVIDER_ADMIN' : ctx.role)
+    ...access.tierInfo(superAdmin ? 'PROVIDER_ADMIN' : ctx.role),
+    ...effectivePermissions(ctx.role)
   };
+};
+
+/**
+ * What the session's role may do and see, for the client to show only the matching data and
+ * buttons. The server enforces the same rules (config/rbac.js, config/dataAccess.js).
+ *   permissions: [{ module, action }]   e.g. { module: 'PR', action: 'ADD' }
+ *   data_access: { PR: 'own', PO: 'all', INVOICE: 'none', ... }
+ */
+const effectivePermissions = (role) => {
+  const { roleAllows } = require('../config/rbac');
+  const { readScopesFor } = require('../config/dataAccess');
+  const SECTIONS = ['PR', 'RFQ', 'PO', 'GRN', 'INVOICE', 'PAYMENT', 'VENDOR', 'AR', 'FINANCE', 'REPORT', 'AUDIT', 'DASHBOARD'];
+  const permissions = [];
+  SECTIONS.forEach((module) => ['view', 'add', 'edit', 'delete'].forEach((action) => {
+    if (roleAllows(role, module, action)) permissions.push({ module, action: action.toUpperCase() });
+  }));
+  return { permissions, data_access: readScopesFor(role) };
 };
 
 /** Signs tokens for a context, stores the refresh session and sets the cookie. Returns the access token. */

@@ -9,11 +9,12 @@ const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 
 router.use(protect);
 router.use(tenantMiddleware);
+const { requireRead } = require('../middleware/dataAccess.middleware');
 
 // Must be before /:id to avoid Express treating 'purchase-orders' as an id param
-router.get('/purchase-orders', grnController.getApprovedPOs);
-router.get('/', grnController.getGRNs);
-router.get('/:id', grnController.getGRNById);
+router.get('/purchase-orders', requireRead('GRN'), grnController.getApprovedPOs);
+router.get('/', requireRead('GRN'), grnController.getGRNs);
+router.get('/:id', requireRead('GRN'), grnController.getGRNById);
 router.post('/create', rbacMiddleware(['WAREHOUSE']), checkPermission('ASSET', 'CREATE'), blockWhenFinancialYearClosed, grnController.createGRN);
 
 module.exports = router;

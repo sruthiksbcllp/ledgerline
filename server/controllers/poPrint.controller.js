@@ -95,9 +95,10 @@ exports.printPo = async (req, res, next) => {
     const clientId = await resolveClientId(req);
     const po = await PurchaseOrder.findOne({
       where: { id: req.params.id, ...(clientId ? { client_id: clientId } : {}) },
-      attributes: ['id', 'po_number']
+      attributes: ['id', 'po_number', 'vendor_id']
     });
-    if (!po) return error(res, 'PO not found', 404);
+    const { canSeeRow } = require('../middleware/dataAccess.middleware');
+    if (!po || !(await canSeeRow(req, 'PO', po, { vendor: 'vendor_id' }))) return error(res, 'PO not found', 404);
 
     const pdf = await generatePoPdf(po.id, clientId);
     res.setHeader('Content-Type', 'application/pdf');

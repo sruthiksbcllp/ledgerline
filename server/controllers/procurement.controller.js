@@ -21,6 +21,7 @@ async function resolveNumCodes({ entity_id, department_id }, transaction) {
   return { entityCode, departmentCode };
 }
 const { rankQuotations } = require('../utils/quotationRanking'); // CR-P02
+const { canSeeRow } = require('../middleware/dataAccess.middleware'); // role-based row visibility
 const { determineGstSplit } = require('../utils/gstPlaceOfSupply'); // CR-P03
 const { writeApprovalLog } = require('../utils/approvalTenancy');
 
@@ -180,7 +181,7 @@ exports.updatePR = async (req, res, next) => {
     const pr = await PurchaseRequisition.findOne({
       where: { id, ...(client_id ? { client_id } : {}) }
     });
-    if (!pr) throw new AppError('PR not found', 404);
+    if (!pr || !(await canSeeRow(req, 'PR', pr, { owner: 'requestor_id' }))) throw new AppError('PR not found', 404);
 
     const roleCode = (req.user?.role || '').toUpperCase();
     const isSuperAdmin = roleCode === 'SUPER_ADMIN' || roleCode === 'PROVIDER_ADMIN';
@@ -399,9 +400,9 @@ exports.getPRApprovalHistory = async (req, res, next) => {
     const client_id = req.user?.client_id;
     const pr = await PurchaseRequisition.findOne({
       where: { id: req.params.id, ...(client_id ? { client_id } : {}) },
-      attributes: ['id']
+      attributes: ['id', 'requestor_id']
     });
-    if (!pr) return error(res, 'PR not found', 404);
+    if (!pr || !(await canSeeRow(req, 'PR', pr, { owner: 'requestor_id' }))) return error(res, 'PR not found', 404);
 
     const logs = await ApprovalLog.findAll({
       where: { module: 'PR', reference_id: req.params.id },
@@ -505,7 +506,7 @@ exports.getPRById = async (req, res, next) => {
       ]
     });
 
-    if (!pr) throw new AppError('PR not found', 404);
+    if (!pr || !(await canSeeRow(req, 'PR', pr, { owner: 'requestor_id' }))) throw new AppError('PR not found', 404);
 
     const items = pr.items || [];
     let calculatedTotal = items.reduce((acc, i) => acc + (Number(i.quantity) * Number(i.estimated_cost)), 0);
@@ -542,7 +543,7 @@ exports.deletePR = async (req, res, next) => {
     const pr = await PurchaseRequisition.findOne({
       where: { id, ...(client_id ? { client_id } : {}) }
     });
-    if (!pr) throw new AppError('PR not found', 404);
+    if (!pr || !(await canSeeRow(req, 'PR', pr, { owner: 'requestor_id' }))) throw new AppError('PR not found', 404);
 
     // FIX: was req.user?.Role?.role_name — use req.user.role string directly
     const roleCode = (req.user?.role || '').toUpperCase();
@@ -882,7 +883,7 @@ exports.getPOById = async (req, res, next) => {
       ]
     });
 
-    if (!po) return error(res, 'Purchase Order not found', 404);
+    if (!po || !(await canSeeRow(req, 'PO', po, { vendor: 'vendor_id' }))) return error(res, 'Purchase Order not found', 404);
     return success(res, po);
   } catch (err) {
     next(err); // let global error handler log the real Sequelize error
@@ -907,7 +908,7 @@ exports.getInvoiceById = async (req, res, next) => {
         { model: GRN, attributes: ['id', 'grn_number', 'status'] }
       ]
     });
-    if (!invoice) throw new AppError('Invoice not found', 404);
+    if (!invoice || !(await canSeeRow(req, 'INVOICE', invoice, { vendor: 'vendor_id' }))) throw new AppError('Invoice not found', 404);
     return success(res, invoice);
   } catch (err) {
     next(err);
@@ -2228,7 +2229,7 @@ exports.getPoApprovalStatus = async (req, res) => {
     const { DoaApprovalRequest, DoaApprovalStep, PurchaseOrder } = require('../models');
     const clientId = getClientId(req);
     const po = await PurchaseOrder.findOne({ where: { id: req.params.id, ...(clientId ? { client_id: clientId } : {}) } });
-    if (!po) return res.status(404).json({ success: false, message: 'PO not found' });
+    if (!po || !(await canSeeRow(req, 'PO', po, { vendor: 'vendor_id' }))) return res.status(404).json({ success: false, message: 'PO not found' });
     const request = await DoaApprovalRequest.findOne({
       where: { module: 'PO', document_id: po.id, ...(clientId ? { client_id: clientId } : {}) },
       order: [['id', 'DESC']]

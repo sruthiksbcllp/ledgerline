@@ -7,8 +7,13 @@ const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 
 router.use(verifyToken);
 router.use(tenantMiddleware);
-router.get('/', userController.getAllUsers);
-router.get('/:id', userController.getUserById);
+
+// The company directory is for internal roles; everyone may always read their own profile.
+const { requireRead } = require('../middleware/dataAccess.middleware');
+const readUsers = requireRead('USERS');
+const selfOrReadUsers = (req, res, next) => (Number(req.params.id) === Number(req.user?.id) ? next() : readUsers(req, res, next));
+router.get('/', readUsers, userController.getAllUsers);
+router.get('/:id', selfOrReadUsers, userController.getUserById);
 
 // Self-update: any authenticated user can update their own profile.
 // Managing OTHER users (edit/create/delete/reset) is a SENIOR-ADMIN action — the plain

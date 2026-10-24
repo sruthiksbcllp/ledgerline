@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import dayjs from 'dayjs';
 import api from '../utils/api';
+import { canSee, getStoredUser, hasPerm } from '../utils/session';
 import {
   ageingBucket, daysPastDue, dueDate, invoiceDate, inr, journalFor, loadApInvoices, num, vendorName,
 } from '../utils/apLedger';
@@ -196,13 +197,19 @@ const ArApDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState(null);
   const [chartView, setChartView] = useState({ ageing: 'chart', trend: 'chart' });
+  // Only the sides this role may see are loaded and shown (the server enforces the same rules).
+  const sessionUser = getStoredUser();
+  const showAP = canSee(sessionUser, 'INVOICE');
+  const showAR = canSee(sessionUser, 'AR');
+  const both = showAP && showAR;
+  const canPay = hasPerm(sessionUser, 'PAYMENT', 'ADD') || hasPerm(sessionUser, 'PAYMENT', 'EDIT');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [invoices, arRes] = await Promise.all([
-        loadApInvoices(),
-        api.get('/ar/invoices').catch(() => null),
+        showAP ? loadApInvoices() : Promise.resolve([]),
+        showAR ? api.get('/ar/invoices').catch(() => null) : Promise.resolve(null),
       ]);
       setPayables(Array.isArray(invoices) ? invoices.filter((row) => row.status !== 'REJECTED') : []);
       // Customer invoices: amount = what is still outstanding; cancelled ones are not receivables.
@@ -224,7 +231,7 @@ const ArApDashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showAP, showAR]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -322,20 +329,18 @@ const ArApDashboard = () => {
   const hasTrend = trendData.some((row) => row.Receivables || row.Payables);
 
   const exportReport = () => {
-    downloadCsv('ar-ap-dashboard.csv', [
+    downloadCsv(both ? 'ar-ap-dashboard.csv' : showAP ? 'payables-dashboard.csv' : 'receivables-dashboard.csv', [
       ['Metric', 'Amount', 'Count'],
-      ['Total Receivables', totalReceivables, openReceivables.length],
-      ['Total Payables', totalPayables, openPayables.length],
-      ['Net Cash Position', totalReceivables - totalPayables, ''],
-      ['Overdue Receivables', overdueReceivableAmount, overdueReceivables.length],
-      ['Overdue Payables', overduePayableAmount, overduePayables.length],
-      ['Average Collection Period (days)', collectionDays, ''],
-      [],
-      ['Recent Receivables', 'Customer', 'Due Date', 'Amount', 'Status'],
-      ...recentReceivables.map((row) => [row.invoice_number, row.customer, fmtDate(row.due), row.amount, statusOf(row, 'receivable')]),
-      [],
-      ['Upcoming Payables', 'Vendor', 'Due Date', 'Amount', 'Status'],
-      ...upcomingPayables.map((row) => [row.invoice_number, vendorName(row), fmtDate(dueDate(row)), journalFor(row).total, statusOf(row, 'payable')]),
+      ...(showAR ? [['Total Receivables', totalReceivables, openReceivables.length]] : []),
+      ...(showAP ? [['Total Payables', totalPayables, openPayables.length]] : []),
+      ...(both ? [['Net Cash Position', totalReceivables - totalPayables, '']] : []),
+      ...(showAR ? [['Overdue Receivables', overdueReceivableAmount, overdueReceivables.length]] : []),
+      ...(showAP ? [['Overdue Payables', overduePayableAmount, overduePayables.length]] : []),
+      ...(showAR ? [['Average Collection Period (days)', collectionDays, '']] : []),
+      ...(showAR ? [[], ['Recent Receivables', 'Customer', 'Due Date', 'Amount', 'Status'],
+        ...recentReceivables.map((row) => [row.invoice_number, row.customer, fmtDate(row.due), row.amount, statusOf(row, 'receivable')])] : []),
+      ...(showAP ? [[], ['Upcoming Payables', 'Vendor', 'Due Date', 'Amount', 'Status'],
+        ...upcomingPayables.map((row) => [row.invoice_number, vendorName(row), fmtDate(dueDate(row)), journalFor(row).total, statusOf(row, 'payable')])] : []),
     ]);
   };
 
@@ -360,22 +365,26 @@ const ArApDashboard = () => {
 
   const tiles = [
     {
+      side: 'AR',
       title: 'Overdue receivables', icon: <Hourglass size={18} />, value: compactInr(overdueReceivableAmount),
       sub: `${overdueReceivables.length} invoice${overdueReceivables.length === 1 ? '' : 's'}`, count: overdueReceivables.length,
     },
     {
+      side: 'AP',
       title: 'Overdue payables', icon: <AlertTriangle size={18} />, value: compactInr(overduePayableAmount),
       sub: `${overduePayables.length} bill${overduePayables.length === 1 ? '' : 's'}`, count: overduePayables.length,
     },
     {
+      side: 'AP',
       title: 'Due in next 7 days', icon: <CalendarClock size={18} />, value: compactInr(dueSoonAmount),
       sub: `${dueSoon.length} bill${dueSoon.length === 1 ? '' : 's'} to pay`, count: 0, okText: dueSoon.length ? 'Plan payments' : 'Nothing due',
     },
     {
+      side: 'AR',
       title: 'Days sales outstanding', icon: <Scale size={18} />, value: `${collectionDays} days`,
       sub: 'Average collection period', count: collectionDays > 60 ? 1 : 0, okText: 'Healthy', badText: 'Slow collections',
     },
-  ];
+  ].filter((tile) => (tile.side === 'AP' ? showAP : showAR));
 
   const tableToggle = (key) => (
     <Segmented
@@ -387,8 +396,8 @@ const ArApDashboard = () => {
   );
   const seriesTableColumns = (first) => [
     { title: first, dataIndex: first === 'Ageing' ? 'bucket' : 'month' },
-    { title: 'Receivables', dataIndex: 'Receivables', align: 'right', render: (v) => inr(v) },
-    { title: 'Payables', dataIndex: 'Payables', align: 'right', render: (v) => inr(v) },
+    ...(showAR ? [{ title: 'Receivables', dataIndex: 'Receivables', align: 'right', render: (v) => inr(v) }] : []),
+    ...(showAP ? [{ title: 'Payables', dataIndex: 'Payables', align: 'right', render: (v) => inr(v) }] : []),
   ];
 
   const receivableColumns = [
@@ -412,7 +421,7 @@ const ArApDashboard = () => {
       render: (_, row) => (
         <Space size={0}>
           <Button type="link" onClick={() => setView({ kind: 'Payable', title: row.invoice_number, party: vendorName(row), due: dueDate(row), amount: journalFor(row).total, status: statusOf(row, 'payable') })}>View</Button>
-          <Button type="link" onClick={() => navigate('/finance/payment-processing')}>Pay</Button>
+          {canPay && <Button type="link" onClick={() => navigate('/finance/payment-processing')}>Pay</Button>}
         </Space>
       ),
     },
@@ -426,7 +435,7 @@ const ArApDashboard = () => {
             <Space size={16} align="center">
               <div className="page-header-icon"><LayoutDashboard size={24} /></div>
               <div>
-                <h2 className="page-header-title">AR & AP Dashboard</h2>
+                <h2 className="page-header-title">{both ? 'AR & AP Dashboard' : showAP ? 'Payables Dashboard' : 'Receivables Dashboard'}</h2>
                 <Text type="secondary">{rangeLabel} · as of {dayjs().format('D MMM YYYY, h:mm A')}</Text>
               </div>
             </Space>
@@ -460,14 +469,14 @@ const ArApDashboard = () => {
         >
           <Row align="middle" justify="space-between" gutter={[16, 16]}>
             <Col xs={24} lg={11}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: INK.primary }}>Your AR & AP workspace is ready</div>
-              <Text type="secondary">Record a few bills or journal entries and this dashboard fills in with balances, ageing and trends.</Text>
+              <div style={{ fontSize: 18, fontWeight: 700, color: INK.primary }}>{both ? 'Your AR & AP workspace is ready' : showAP ? 'No payables yet' : 'No receivables yet'}</div>
+              <Text type="secondary">{showAP ? 'Record vendor bills' : 'Record customer invoices'} and this dashboard fills in with balances, ageing and trends.</Text>
             </Col>
             <Col xs={24} lg={13}>
               <Space wrap style={{ justifyContent: 'flex-end', width: '100%' }}>
-                <Button type="primary" icon={<FilePlus2 size={16} />} onClick={() => navigate('/procurement/invoices')}>Record a vendor bill</Button>
-                <Button icon={<UserPlus size={16} />} onClick={() => navigate('/vendor-master')}>Add a vendor</Button>
-                <Button icon={<NotebookPen size={16} />} onClick={() => navigate('/finance/ar/journal-entry')}>Post a journal entry</Button>
+                {hasPerm(sessionUser, 'INVOICE', 'ADD') && <Button type="primary" icon={<FilePlus2 size={16} />} onClick={() => navigate('/procurement/invoices')}>Record a vendor bill</Button>}
+                {hasPerm(sessionUser, 'VENDOR', 'ADD') && <Button icon={<UserPlus size={16} />} onClick={() => navigate('/vendor-master')}>Add a vendor</Button>}
+                {hasPerm(sessionUser, 'FINANCE', 'ADD') && <Button icon={<NotebookPen size={16} />} onClick={() => navigate('/finance/ar/journal-entry')}>Post a journal entry</Button>}
               </Space>
             </Col>
           </Row>
@@ -478,17 +487,19 @@ const ArApDashboard = () => {
         <Col xs={24} xl={10}>
           <Card style={card} styles={{ body: { padding: 22 } }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-              <Text type="secondary">Net cash position</Text>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: position.color, background: 'var(--color-bg-subtle, #F1F5F9)', borderRadius: 999, padding: '3px 10px' }}>
-                {position.icon} {position.text}
-              </span>
+              <Text type="secondary">{both ? 'Net cash position' : showAP ? 'Open payables' : 'Open receivables'}</Text>
+              {both && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: position.color, background: 'var(--color-bg-subtle, #F1F5F9)', borderRadius: 999, padding: '3px 10px' }}>
+                  {position.icon} {position.text}
+                </span>
+              )}
             </div>
             <div style={{ fontSize: 38, fontWeight: 700, color: INK.primary, lineHeight: 1.15, margin: '6px 0 2px' }}>
-              {netPosition < 0 ? '−' : ''}{inr(Math.abs(netPosition))}
+              {both ? <>{netPosition < 0 ? '−' : ''}{inr(Math.abs(netPosition))}</> : inr(showAP ? totalPayables : totalReceivables)}
             </div>
-            <Text type="secondary" style={{ fontSize: 12 }}>Open receivables minus open payables</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{both ? 'Open receivables minus open payables' : showAP ? 'Unpaid vendor bills' : 'Outstanding customer invoices'}</Text>
 
-            <div style={{ display: 'flex', gap: 2, height: 10, margin: '18px 0 16px', borderRadius: 5, overflow: 'hidden', background: '#F1F5F9' }}>
+            <div style={{ display: both ? 'flex' : 'none', gap: 2, height: 10, margin: '18px 0 16px', borderRadius: 5, overflow: 'hidden', background: '#F1F5F9' }}>
               {openTotal > 0 && (
                 <>
                   {totalReceivables > 0 && <div style={{ width: `${arShare}%`, background: AR_COLOR }} title={`Receivables ${inr(totalReceivables)}`} />}
@@ -498,8 +509,8 @@ const ArApDashboard = () => {
             </div>
 
             {[
-              { label: 'Receivables', color: AR_COLOR, amount: totalReceivables, count: openReceivables.length, key: 'Receivables' },
-              { label: 'Payables', color: AP_COLOR, amount: totalPayables, count: openPayables.length, key: 'Payables' },
+              ...(showAR ? [{ label: 'Receivables', color: AR_COLOR, amount: totalReceivables, count: openReceivables.length, key: 'Receivables' }] : []),
+              ...(showAP ? [{ label: 'Payables', color: AP_COLOR, amount: totalPayables, count: openPayables.length, key: 'Payables' }] : []),
             ].map((side) => (
               <div key={side.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light, #F1F5F9)' }}>
                 <Swatch color={side.color} />
@@ -553,8 +564,8 @@ const ArApDashboard = () => {
                   <YAxis tickFormatter={compactInr} width={64} tick={{ fill: INK.muted, fontSize: 12 }} axisLine={false} tickLine={false} />
                   <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(148,163,184,0.12)' }} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: INK.secondary }} />
-                  <Bar dataKey="Receivables" fill={AR_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />
-                  <Bar dataKey="Payables" fill={AP_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />
+                  {showAR && <Bar dataKey="Receivables" fill={AR_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />}
+                  {showAP && <Bar dataKey="Payables" fill={AP_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />}
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -574,10 +585,10 @@ const ArApDashboard = () => {
                   <YAxis tickFormatter={compactInr} width={64} tick={{ fill: INK.muted, fontSize: 12 }} axisLine={false} tickLine={false} />
                   <Tooltip content={<ChartTooltip />} cursor={{ stroke: AXIS }} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: INK.secondary }} />
-                  <Line type="linear" dataKey="Receivables" stroke={AR_COLOR} strokeWidth={2}
-                    dot={{ r: 4, fill: AR_COLOR, stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 5, stroke: '#fff', strokeWidth: 2 }} />
-                  <Line type="linear" dataKey="Payables" stroke={AP_COLOR} strokeWidth={2}
-                    dot={{ r: 4, fill: AP_COLOR, stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 5, stroke: '#fff', strokeWidth: 2 }} />
+                  {showAR && <Line type="linear" dataKey="Receivables" stroke={AR_COLOR} strokeWidth={2}
+                    dot={{ r: 4, fill: AR_COLOR, stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 5, stroke: '#fff', strokeWidth: 2 }} />}
+                  {showAP && <Line type="linear" dataKey="Payables" stroke={AP_COLOR} strokeWidth={2}
+                    dot={{ r: 4, fill: AP_COLOR, stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 5, stroke: '#fff', strokeWidth: 2 }} />}
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -586,20 +597,20 @@ const ArApDashboard = () => {
       </Row>
 
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-        <Col xs={24} xl={12}>
+        {showAR && <Col xs={24} xl={both ? 12 : 24}>
           <Card style={card} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Swatch color={AR_COLOR} /> Top 5 customers by outstanding</span>}>
             <RankList rows={topCustomers} empty="No customer balances yet" color={AR_COLOR} total={totalReceivables} />
           </Card>
-        </Col>
-        <Col xs={24} xl={12}>
+        </Col>}
+        {showAP && <Col xs={24} xl={both ? 12 : 24}>
           <Card style={card} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Swatch color={AP_COLOR} /> Top 5 vendors by outstanding</span>}>
             <RankList rows={topVendors} empty="No vendor balances yet" color={AP_COLOR} total={totalPayables} />
           </Card>
-        </Col>
+        </Col>}
       </Row>
 
       <Row gutter={[16, 16]}>
-        <Col xs={24} xl={12}>
+        {showAR && <Col xs={24} xl={both ? 12 : 24}>
           <Card style={card} styles={{ body: { padding: 0 } }} title="Recent Receivables">
             <Table
               rowKey={(row) => row.id || row.invoice_number}
@@ -610,8 +621,8 @@ const ArApDashboard = () => {
               locale={{ emptyText: <Empty description="No receivables in this period" style={{ margin: '28px 0' }} /> }}
             />
           </Card>
-        </Col>
-        <Col xs={24} xl={12}>
+        </Col>}
+        {showAP && <Col xs={24} xl={both ? 12 : 24}>
           <Card style={card} styles={{ body: { padding: 0 } }} title="Upcoming Payables">
             <Table
               rowKey="id"
@@ -623,7 +634,7 @@ const ArApDashboard = () => {
               locale={{ emptyText: <Empty description="No upcoming payables" style={{ margin: '28px 0' }} /> }}
             />
           </Card>
-        </Col>
+        </Col>}
       </Row>
 
       <Drawer open={!!view} title={view ? `${view.kind} ${view.title || ''}` : ''} onClose={() => setView(null)} width={380}>

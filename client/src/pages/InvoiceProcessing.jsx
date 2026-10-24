@@ -26,6 +26,8 @@ const MATCH_STATUS_COLOR = {
 };
 
 const InvoiceProcessing = () => {
+  // Same roles the server lets create invoices (POST /procurement/invoices), plus company admins.
+  const canCreateInvoice = ['ADMIN', 'SUPER_ADMIN', 'CLIENT_ADMIN', 'PROVIDER_ADMIN', 'ACCOUNTS_PAYABLE', 'FINANCE', 'VENDOR'].includes(String(JSON.parse(localStorage.getItem('user') || '{}').role || '').toUpperCase());
   const [data, setData] = useState([]);
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
@@ -279,9 +281,11 @@ const InvoiceProcessing = () => {
             <Button icon={<Download size={14} />} onClick={exportAllInvoices}>
               Export Excel
             </Button>
-            <Button icon={<Plus size={14} />} type="primary" onClick={openAdd}>
-              New Invoice
-            </Button>
+            {canCreateInvoice && (
+              <Button icon={<Plus size={14} />} type="primary" onClick={openAdd}>
+                New Invoice
+              </Button>
+            )}
           </Space>
         )}
       />

@@ -12,6 +12,9 @@ import { formatCurrency } from '../utils/format';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import { addPdfBranding, buildBrandedExcelSheet } from '../utils/exportBranding';
 import PageHeader from '../components/PageHeader';
+import { canSee, getStoredUser, hasPerm, seeScope } from '../utils/session';
+
+const REPORT_DATA = { PR: 'PR', PO: 'PO', GRN: 'GRN', INVOICE: 'INVOICE' };
 
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
@@ -27,6 +30,8 @@ const REPORT_TYPES = [
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
 
 const ProcurementReports = () => {
+  // Only the reports for data this role may see (the server refuses the rest).
+  const visibleReports = REPORT_TYPES.filter((t) => (t.value === 'ISSUE' ? seeScope(getStoredUser(), 'PR') === 'all' && hasPerm(getStoredUser(), 'AUDIT', 'VIEW') : canSee(getStoredUser(), REPORT_DATA[t.value])));
   const [reportType, setReportType] = useState(null); // nothing is shown until a report is chosen
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
@@ -189,7 +194,7 @@ const ProcurementReports = () => {
                 onChange={setReportType}
                 placeholder="Select a report"
               >
-                {REPORT_TYPES.map((t) => <Select.Option key={t.value} value={t.value}>{t.label}</Select.Option>)}
+                {visibleReports.map((t) => <Select.Option key={t.value} value={t.value}>{t.label}</Select.Option>)}
               </Select>
             </Col>
             {reportType && (<>
@@ -217,7 +222,7 @@ const ProcurementReports = () => {
             <>
               <Text type="secondary" style={{ display: 'block', marginBottom: 14 }}>Choose a report to view its results</Text>
               <Row gutter={[16, 16]}>
-                {REPORT_TYPES.map(({ value, label, description, icon: Icon, color }) => (
+                {visibleReports.map(({ value, label, description, icon: Icon, color }) => (
                   <Col xs={24} sm={12} xl={8} key={value}>
                     <Card
                       hoverable

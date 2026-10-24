@@ -124,6 +124,19 @@ router.post('/vendors/extract', aiDocumentUpload, async (req, res) => {
   }
 });
 
+// Vendor data by role (config/dataAccess.js). A vendor's own login only reaches its own vendor
+// record (the list is narrowed in the controller); company-wide vendor dashboards are not for it.
+{
+  const { requireRead, vendorIdOf } = require('../middleware/dataAccess.middleware');
+  const { readScope } = require('../config/dataAccess');
+  router.use('/vendors', requireRead('VENDOR'), async (req, res, next) => {
+    if (readScope(req.user?.role, 'VENDOR') !== 'vendor') return next();
+    if (req.path === '/' || req.path === '') return next();
+    const m = req.path.match(/^\/(\d+)(\/.*)?$/);
+    if (m && Number(m[1]) === Number(await vendorIdOf(req))) return next();
+    return res.status(403).json({ success: false, code: 'NO_DATA_ACCESS', message: 'Your role does not have access to this information.' });
+  });
+}
 router.get('/vendors', masterController.getAllVendors);
 router.get('/vendors/compliance-dashboard', masterController.getVendorComplianceDashboard);
 router.get('/vendors/risk-insights', masterController.getVendorRiskInsights);

@@ -3,6 +3,7 @@ import { Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Tabl
 import { useNavigate } from 'react-router-dom';
 import { Plus, RefreshCcw, FileText, Eye, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import api from '../utils/api';
+import { getStoredUser, hasPerm } from '../utils/session';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
 
@@ -364,7 +365,7 @@ const PurchaseRequisition = () => {
         actions={
           <Space wrap size={8}>
             <Button icon={<RefreshCcw size={16} />} onClick={load} loading={loading}>Refresh</Button>
-            <Button type="primary" icon={<Plus size={16} />} onClick={async () => { setOpen(true); try { const vnd = await api.get('/masters/vendors'); setVendors(normalizeResponse(vnd?.data)); } catch { /* keep the vendors already loaded */ } }} style={primaryBtn}>New PR</Button>
+            {hasPerm(getStoredUser(), 'PR', 'ADD') && <Button type="primary" icon={<Plus size={16} />} onClick={async () => { setOpen(true); try { const vnd = await api.get('/masters/vendors'); setVendors(normalizeResponse(vnd?.data)); } catch { /* keep the vendors already loaded */ } }} style={primaryBtn}>New PR</Button>}
           </Space>
         }
       />

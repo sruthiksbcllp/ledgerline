@@ -63,7 +63,7 @@ const ArTrialBalance = lazy(() => import('./pages/ar/TrialBalance'));
 const FinancialStatements = lazy(() => import('./pages/ar/FinancialStatements'));
 const PeriodClose = lazy(() => import('./pages/ar/PeriodClose'));
 const VendorRiskDashboard = lazy(() => import('./pages/VendorRiskDashboard'));
-const ArApDashboard = lazy(() => import('./pages/ArApDashboard'));
+const ArApDashboard = lazy(() => import('./pages/Dashboard'));
 const SystemSettings = lazy(() => import('./pages/SystemSettings'));
 const ERPIntegration = lazy(() => import('./pages/ERPIntegration'));
 const DoaMatrixConfig = lazy(() => import('./pages/DoaMatrixConfig'));

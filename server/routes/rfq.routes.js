@@ -10,10 +10,11 @@ const checkFeature = require('../middleware/featureGuard.middleware');
 router.use(protect);
 router.use(tenantMiddleware);
 router.use(checkFeature('RFQ_MODULE'));
+const { requireRead } = require('../middleware/dataAccess.middleware');
 
-router.get('/', ctrl.getRfqs);
+router.get('/', requireRead('RFQ'), ctrl.getRfqs);
 router.get('/replies/pending', requireSeniorAdmin, ctrl.pendingReplies); // before '/:id'
-router.get('/:id', ctrl.getRfqById);
+router.get('/:id', requireRead('RFQ'), ctrl.getRfqById);
 // Vendor replies come from the logged-in admin's own Outlook mailbox.
 router.get('/:id/replies', requireSeniorAdmin, ctrl.listReplies);
 router.get('/:id/replies/:messageId', requireSeniorAdmin, ctrl.getReply);
