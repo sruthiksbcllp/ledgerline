@@ -90,6 +90,7 @@ const PERMISSIONS = {
     PO: { view: true, add: false, edit: true, delete: false },
     SES: { view: true, add: false, edit: true, delete: false },
     PAYMENT: { view: true, add: false, edit: true, delete: false },
+    AR: { view: true, add: false, edit: false, delete: false }, // read-only receivables for the AR & AP dashboard (config/dataAccess.js AR scope)
     REPORT: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },

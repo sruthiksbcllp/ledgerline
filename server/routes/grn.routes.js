@@ -15,6 +15,7 @@ const { requireRead } = require('../middleware/dataAccess.middleware');
 router.get('/purchase-orders', requireRead('GRN'), grnController.getApprovedPOs);
 router.get('/', requireRead('GRN'), grnController.getGRNs);
 router.get('/:id', requireRead('GRN'), grnController.getGRNById);
-router.post('/create', rbacMiddleware(['WAREHOUSE']), checkPermission('ASSET', 'CREATE'), blockWhenFinancialYearClosed, grnController.createGRN);
+// Recording a receipt is the GRN permission (Warehouse: GRN add), not the legacy asset permission.
+router.post('/create', rbacMiddleware(['WAREHOUSE']), checkPermission('GRN', 'CREATE'), blockWhenFinancialYearClosed, grnController.createGRN);
 
 module.exports = router;
