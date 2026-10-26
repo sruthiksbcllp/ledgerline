@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Col, Empty, Row, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import { RefreshCcw, Scale } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
+import api from '../utils/api';
+import { ActorStamp, formatWhen, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import {
   AGEING_BUCKETS, ageingBucket, daysPastDue, dueDate, inr, isOpenInvoice,
   journalFor, loadApInvoices, num, readApStore, vendorName, writeApStore,
@@ -72,16 +74,29 @@ const ApManagement = () => {
   }), [rows]);
 
   const persist = (next) => setStore(writeApStore(next));
+  const [trailTick, setTrailTick] = useState(0);
+  const lastActions = useLastActions('INVOICE', openRows, `${rows.length}-${trailTick}`);
 
-  const toggleHold = (row) => {
+  // Holds and proposals are kept in this browser; the step itself is recorded on the server for the
+  // signed-in user (role and name), so it shows on the invoice's activity trail.
+  const recordStep = async (invoiceIds, step, reference) => {
+    const results = await Promise.all(invoiceIds.map((id) => api.post(`/workflow-events/INVOICE/${id}/step`, { step, reference }).then((r) => r?.data?.data).catch(() => null)));
+    setTrailTick((t) => t + 1);
+    return results.find(Boolean) || null;
+  };
+  const stamp = (ev) => (ev ? { role_name: ev.role_name, user_name: ev.user_name, at: ev.occurred_at } : {});
+
+  const toggleHold = async (row) => {
     const holds = { ...store.holds };
-    if (holds[row.id]) delete holds[row.id];
-    else holds[row.id] = { at: new Date().toISOString(), reason: 'Held by AP' };
+    const releasing = Boolean(holds[row.id]);
+    const ev = await recordStep([row.id], releasing ? 'RELEASE_HOLD' : 'HOLD');
+    if (releasing) delete holds[row.id];
+    else holds[row.id] = { at: new Date().toISOString(), reason: 'Held by AP', ...stamp(ev) };
     persist({ ...store, holds });
-    message.success(holds[row.id] ? 'Invoice placed on hold' : 'Hold released');
+    message.success(releasing ? 'Hold released' : 'Invoice placed on hold');
   };
 
-  const createProposal = () => {
+  const createProposal = async () => {
     const ids = selectedKeys.filter((id) => {
       const row = rows.find((item) => item.id === id);
       return row && isOpenInvoice(row) && !store.holds[id];
@@ -90,11 +105,14 @@ const ApManagement = () => {
       message.warning('Select open invoices that are not on hold');
       return;
     }
+    const id = `PP-${Date.now()}`;
+    const ev = await recordStep(ids, 'PAYMENT_PROPOSAL', id);
     const proposal = {
-      id: `PP-${Date.now()}`,
+      id,
       invoiceIds: ids,
       status: 'PROPOSAL',
       createdAt: new Date().toISOString(),
+      history: [{ step: 'PROPOSAL', ...stamp(ev) }],
     };
     persist({ ...store, proposals: [proposal, ...store.proposals] });
     setSelectedKeys([]);
@@ -124,6 +142,7 @@ const ApManagement = () => {
         </Button>
       ),
     },
+    lastActionColumn('INVOICE', lastActions, { numberOf: (r) => r.invoice_number }),
   ];
 
   return (
@@ -230,6 +249,15 @@ const ApManagement = () => {
             { title: 'Invoices', key: 'count', render: (_, row) => row.invoiceIds.length },
             { title: 'Status', dataIndex: 'status', render: (v) => <Tag color="processing">{String(v || '').replace(/_/g, ' ')}</Tag> },
             { title: 'Created', dataIndex: 'createdAt', render: (v) => fmtDate(v ? new Date(v) : null) },
+            {
+              title: 'Last step by (Role | User)',
+              key: 'by',
+              render: (_, row) => {
+                const last = (row.history || [])[(row.history || []).length - 1];
+                if (!last?.user_name) return <Text type="secondary">—</Text>;
+                return <div><ActorStamp event={last} size="small" /><div><Text type="secondary" style={{ fontSize: 11 }}>{formatWhen(last.at)}</Text></div></div>;
+              },
+            },
           ]}
         />
       </Card>

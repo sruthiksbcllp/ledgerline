@@ -82,6 +82,20 @@ exports.showConfirm = async (req, res) => {
     <div class="note">This is a single-use, time-limited link. Your decision and IP are recorded for audit.</div>`));
 };
 
+async function emailApproverActor(token) {
+  const email = String(token?.approver_email || '').trim().toLowerCase();
+  const fallback = { user_name: token?.approver_name || email || 'Email approver', role_name: 'External Approver (email link)', source: 'EMAIL_LINK', client_id: token?.client_id };
+  if (!email) return fallback;
+  try {
+    const { User, CompanyMembership } = require('../models');
+    const user = await User.findOne({ where: { email }, attributes: ['id', 'client_id'] });
+    if (!user) return fallback;
+    const m = await CompanyMembership.findOne({ where: { user_id: user.id, client_id: token.client_id, status: 'ACTIVE' }, attributes: ['role_code'] });
+    if (!m && Number(user.client_id) !== Number(token.client_id)) return fallback;
+    return { user_id: user.id, role_code: m?.role_code || null, source: 'EMAIL_LINK', client_id: token.client_id };
+  } catch (e) { return fallback; }
+}
+
 exports.submitDecision = async (req, res) => {
   const action = String((req.body && req.body.action) || '').toLowerCase();
   if (!['approve', 'reject'].includes(action)) {
@@ -97,6 +111,10 @@ exports.submitDecision = async (req, res) => {
   }
   // Phase 2b-2: advance the DOA chain from the consumed token, and flip the PO when the
   // whole request is decided. Wrapped so a recording error never breaks the approver page.
+  // The PO's activity trail names the approver: their user account and role when the email
+  // belongs to someone in this company, otherwise the name on the approval link.
+  const actor = await emailApproverActor(result.token);
+  await require('../utils/requestContext').run({ actor, comment }, async () => {
   try {
     if (result.token && result.token.step_id) {
       const { DoaApprovalStep, DoaApprovalRequest, PurchaseOrder } = require('../models');
@@ -119,6 +137,7 @@ exports.submitDecision = async (req, res) => {
       }
     }
   } catch (e) { /* recording must not break the approver confirmation page */ }
+  });
 
   const verb = decision === 'APPROVED' ? 'approved' : 'rejected';
   return res.send(page('Recorded', `<h1>Decision recorded</h1><div class="row">You have <b>${esc(verb)}</b> this request. Thank you — you may close this window.</div>`));

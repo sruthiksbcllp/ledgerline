@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button, Card, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Segmented,
-  Space, Steps, Table, Tag, Timeline, Typography, message
+  Space, Steps, Table, Tag, Typography, message
 } from 'antd';
 import { RefreshCcw, ClipboardCheck, Eye, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -9,14 +9,13 @@ import dayjs from 'dayjs';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const { Text } = Typography;
 
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
 const inr = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const fmtDate = (v) => (v ? dayjs(v).format('DD MMM YYYY') : '-');
-const fmtDateTime = (v) => (v ? dayjs(v).format('DD MMM YYYY, HH:mm') : '');
-const personName = (u) => (u ? `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email : '');
 
 // Workflow from the FDS (section 8): 1 Service Performed -> 2 Service Confirmation -> 3 Manager Review -> 4 SES Approval
 const STAGE_STEPS = [
@@ -189,6 +188,8 @@ const ServiceEntrySheets = () => {
     }
   ];
 
+  const lastActions = useLastActions('SES', sheets, sheets);
+
   const sesColumns = [
     { title: 'SES Number', dataIndex: 'ses_number', key: 'ses_number', render: (v, r) => <Button type="link" style={{ paddingInline: 0 }} onClick={() => openView(r)}>{v}</Button> },
     { title: 'PO Number', key: 'po', render: (_, r) => r.PurchaseOrder?.po_number || '-' },
@@ -204,6 +205,7 @@ const ServiceEntrySheets = () => {
         return <Text type="secondary">{r.status === 'APPROVED' ? 'Not invoiced' : '-'}</Text>;
       }
     },
+    lastActionColumn('SES', lastActions, { numberOf: (r) => r.ses_number }),
     {
       title: 'Action', key: 'action', width: 230,
       render: (_, r) => (
@@ -237,26 +239,7 @@ const ServiceEntrySheets = () => {
     { title: 'Amount', key: 'amount', align: 'right', render: (_, r) => inr(Number(qty[r.id] || 0) * Number(r.unit_price || 0)) }
   ];
 
-  const timeline = (s) => {
-    const items = [
-      { color: 'green', title: 'Service Performed', who: s.Creator, at: s.created_at || s.createdAt, note: s.service_description }
-    ];
-    if (s.confirmed_at) items.push({ color: 'green', title: 'Service Confirmation', who: s.Confirmer, at: s.confirmed_at, note: s.confirmation_remarks });
-    if (s.reviewed_at) items.push({ color: 'green', title: 'Manager Review', who: s.Reviewer, at: s.reviewed_at, note: s.review_remarks });
-    if (s.approved_at) items.push({ color: 'green', title: 'SES Approval', who: s.Approver, at: s.approved_at, note: s.approval_remarks });
-    if (s.status === 'REJECTED') items.push({ color: 'red', title: `Rejected at ${s.rejected_stage || 'review'}`, who: s.Rejecter, at: s.rejected_at, note: s.rejection_reason });
-    else if (s.status !== 'APPROVED') items.push({ color: 'gray', title: `Waiting: ${STAGE_STEPS[stageIndex(s.status)]?.title}`, pending: true });
-    return items.map((i) => ({
-      color: i.color,
-      children: (
-        <div>
-          <Text strong>{i.title}</Text>
-          {!i.pending && <div><Text type="secondary">{personName(i.who) || 'Unknown user'} · {fmtDateTime(i.at)}</Text></div>}
-          {i.note && <div><Text>{i.note}</Text></div>}
-        </div>
-      )
-    }));
-  };
+  const waitingFor = (s) => (['APPROVED', 'REJECTED'].includes(s.status) ? null : STAGE_STEPS[stageIndex(s.status)]?.title);
 
   return (
     <div style={{ background: 'var(--color-bg-page)', minHeight: '100%', margin: -24, padding: 24 }}>
@@ -444,8 +427,8 @@ const ServiceEntrySheets = () => {
                 { title: 'Amount', dataIndex: 'amount', key: 'amount', align: 'right', render: inr }
               ]}
             />
-            <Text strong style={{ display: 'block', marginBottom: 8 }}>History</Text>
-            <Timeline items={timeline(view)} />
+            {waitingFor(view) && <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>Waiting for: {waitingFor(view)}</Text>}
+            <ActivityTrail module="SES" id={view.id} refreshKey={view} />
           </>
         )}
       </Modal>

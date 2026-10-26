@@ -4,6 +4,7 @@ import { ShieldCheck, RefreshCcw, Plus, Minus, Eye, Trash2 } from 'lucide-react'
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
 
@@ -110,6 +111,8 @@ const GateEntryManagement = () => {
     });
   };
 
+  const lastActions = useLastActions('GATE_ENTRY', entries, entries);
+
   const columns = [
     { title: 'Gate Entry #', dataIndex: 'gate_entry_number', key: 'ge', render: v => <Tag color="blue">{v}</Tag> },
     { title: 'PO', key: 'po', render: (_, r) => r?.PurchaseOrder?.po_number || '-' },
@@ -119,6 +122,7 @@ const GateEntryManagement = () => {
     { title: 'Items', key: 'items', render: (_, r) => r?.items?.length || 0 },
     { title: 'GRN', key: 'grn', render: (_, r) => r?.GRN ? <Tag color="success">{r.GRN.grn_number}</Tag> : <Tag>Pending</Tag> },
     { title: 'Date', dataIndex: 'createdAt', key: 'date', render: v => v ? new Date(v).toLocaleDateString('en-IN') : '-' },
+    lastActionColumn('GATE_ENTRY', lastActions, { numberOf: (r) => r.gate_entry_number }),
     { title: 'Actions', key: 'actions', fixed: 'right', width: 130, render: (_, r) => {
       const posted = !!r?.grn_id || !!r?.GRN;
       return (
@@ -262,6 +266,9 @@ const GateEntryManagement = () => {
                 { title: 'QC Remarks', dataIndex: 'qc_remarks', key: 'rem' }
               ]}
             />
+            <div style={{ marginTop: 20 }}>
+              <ActivityTrail module="GATE_ENTRY" id={viewRow.id} refreshKey={entries} />
+            </div>
           </>
         )}
       </Drawer>

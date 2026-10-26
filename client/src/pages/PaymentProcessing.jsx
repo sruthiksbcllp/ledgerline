@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Col, Empty, Row, Space, Steps, Table, Tag, Typography, message } from 'antd';
 import { CheckCircle2, RefreshCcw, WalletCards } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
+import { ActorStamp, formatWhen, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import api from '../utils/api';
 import {
   inr, isOpenInvoice, journalFor, loadApInvoices, paymentJournal, plain,
@@ -55,6 +56,28 @@ const PaymentProcessing = () => {
   const payableTotal = proposalInvoices.reduce((sum, row) => sum + journalFor(row).total, 0);
   const confirmed = proposal?.status === 'CONFIRMED' || (proposalInvoices.length > 0 && proposalInvoices.every((row) => row.status === 'PAID'));
 
+  const lastActions = useLastActions('INVOICE', proposalInvoices, rows);
+
+  // Who moved the proposal to each step: the server records it for the signed-in user. Steps that
+  // live only in this browser are sent as named workflow steps; the others are read back from the trail.
+  const recordLocalStep = async (invoices, step) => {
+    const results = await Promise.all(invoices.map((row) => api.post(`/workflow-events/INVOICE/${row.id}/step`, { step, reference: proposal.id }).then((r) => r?.data?.data).catch(() => null)));
+    return results.find(Boolean) || null;
+  };
+  const latestEventFor = async (invoices) => {
+    if (!invoices.length) return null;
+    try {
+      const res = await api.get('/workflow-events/INVOICE/latest', { params: { ids: invoices.map((r) => r.id).join(',') } });
+      const all = Object.values(res?.data?.data || {});
+      return all.sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at))[0] || null;
+    } catch { return null; }
+  };
+  const withStep = (p, status, event) => ({
+    ...p,
+    status,
+    history: [...(p.history || []), { step: status, at: event?.occurred_at || new Date().toISOString(), role_name: event?.role_name, user_name: event?.user_name }]
+  });
+
   const persistProposal = (nextProposal) => {
     const proposals = store.proposals.map((item) => (item.id === nextProposal.id ? nextProposal : item));
     const next = writeApStore({ ...store, proposals });
@@ -84,19 +107,25 @@ const PaymentProcessing = () => {
     setWorking(true);
     try {
       if (current === 'DUE') {
-        persistProposal({ ...proposal, status: 'PROPOSAL' });
+        const ev = await recordLocalStep(proposalInvoices, 'PAYMENT_PROPOSAL');
+        persistProposal(withStep(proposal, 'PROPOSAL', ev));
         message.success('Payment proposal prepared');
+        await load();
       } else if (current === 'PROPOSAL') {
-        await Promise.all(proposalInvoices.filter(isOpenInvoice).map((row) => api.put(`/procurement/invoices/${row.id}/approve-for-payment`, {})));
-        persistProposal({ ...proposal, status: 'FINANCE_APPROVAL' });
+        const open = proposalInvoices.filter(isOpenInvoice);
+        await Promise.all(open.map((row) => api.put(`/procurement/invoices/${row.id}/approve-for-payment`, {})));
+        persistProposal(withStep(proposal, 'FINANCE_APPROVAL', await latestEventFor(open)));
         message.success('Sent for finance approval');
         await load();
       } else if (current === 'FINANCE_APPROVAL') {
-        persistProposal({ ...proposal, status: 'BANK_PAYMENT' });
+        const ev = await recordLocalStep(proposalInvoices, 'BANK_PAYMENT');
+        persistProposal(withStep(proposal, 'BANK_PAYMENT', ev));
         message.success('Bank payment recorded');
+        await load();
       } else if (current === 'BANK_PAYMENT') {
-        await Promise.all(proposalInvoices.filter(isOpenInvoice).map((row) => api.put(`/procurement/invoices/${row.id}/mark-paid`, {})));
-        persistProposal({ ...proposal, status: 'CONFIRMED' });
+        const open = proposalInvoices.filter(isOpenInvoice);
+        await Promise.all(open.map((row) => api.put(`/procurement/invoices/${row.id}/mark-paid`, {})));
+        persistProposal(withStep(proposal, 'CONFIRMED', await latestEventFor(open)));
         message.success('Payment confirmed');
         await load();
       }
@@ -159,6 +188,20 @@ const PaymentProcessing = () => {
                 { title: 'Proposal', dataIndex: 'id' },
                 { title: 'Step', dataIndex: 'status', render: (v) => <Tag>{STEPS.find((step) => step.key === v)?.title || v}</Tag> },
                 { title: 'Invoices', key: 'count', render: (_, row) => row.invoiceIds.length },
+                {
+                  title: 'Last step by (Role | User)',
+                  key: 'by',
+                  render: (_, row) => {
+                    const last = (row.history || [])[row.history?.length - 1];
+                    if (!last || !last.user_name) return <Text type="secondary" style={{ fontSize: 12 }}>{row.createdAt ? `Started ${formatWhen(row.createdAt)}` : '—'}</Text>;
+                    return (
+                      <div>
+                        <ActorStamp event={last} size="small" />
+                        <div><Text type="secondary" style={{ fontSize: 11 }}>{STEPS.find((step) => step.key === last.step)?.title} · {formatWhen(last.at)}</Text></div>
+                      </div>
+                    );
+                  }
+                },
               ]}
             />
           </Card>
@@ -191,6 +234,7 @@ const PaymentProcessing = () => {
                 { title: 'Vendor', key: 'vendor', render: (_, row) => vendorName(row) },
                 { title: 'Amount', key: 'amount', align: 'right', render: (_, row) => inr(journalFor(row).total) },
                 { title: 'Status', dataIndex: 'status', render: (v) => <Tag color={v === 'PAID' ? 'success' : 'processing'}>{v || 'UNPAID'}</Tag> },
+                lastActionColumn('INVOICE', lastActions, { numberOf: (r) => r.invoice_number }),
               ]}
             />
           </Card>

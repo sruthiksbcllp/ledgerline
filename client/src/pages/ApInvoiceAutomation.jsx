@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Button, Card, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Row, Segmented,
-  Select, Space, Table, Tag, Timeline, Typography, message,
+  Select, Space, Table, Tag, Typography, message,
 } from 'antd';
 import { CheckCircle2, FilePlus2, PenLine, ReceiptIndianRupee, RefreshCcw, Sparkles, Trash2, XCircle } from 'lucide-react';
 import dayjs from 'dayjs';
 import api from '../utils/api';
 import { inr } from '../utils/apLedger';
 import { ChecksPanel, DocumentDropzone, StatusTag } from '../components/finance/DocumentReview';
-import { checkUploadFile, historyItems, markProps } from '../utils/documentReview';
+import { checkUploadFile, markProps } from '../utils/documentReview';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const { Text } = Typography;
 
@@ -261,6 +262,8 @@ const ApInvoiceAutomation = () => {
     if (ok) setPayOpen(false);
   };
 
+  const lastActions = useLastActions('INVOICE', rows, rows);
+
   const columns = [
     { title: 'Invoice', dataIndex: 'invoice_number', render: (v, r) => <Space size={6}><Text strong>{v}</Text>{r.source === 'AI_EXTRACTED' && <Tag icon={<Sparkles size={11} style={{ marginRight: 3 }} />} color="geekblue">AI</Tag>}</Space> },
     { title: 'Vendor', key: 'vendor', render: (_, r) => r.Vendor?.vendor_name || '—' },
@@ -270,6 +273,7 @@ const ApInvoiceAutomation = () => {
     { title: 'Total', dataIndex: 'total_amount', align: 'right', render: (v) => inr(v) },
     { title: 'Balance', dataIndex: 'balance', align: 'right', render: (v) => inr(v) },
     { title: 'Status', dataIndex: 'status', render: (v) => <StatusTag status={v} /> },
+    lastActionColumn('INVOICE', lastActions, { numberOf: (r) => r.invoice_number }),
     { title: '', key: 'open', render: (_, r) => <Button type="link" onClick={() => openDetail(r.id)}>Open</Button> },
   ];
 
@@ -514,10 +518,7 @@ const ApInvoiceAutomation = () => {
                 { title: 'Amount', dataIndex: 'amount', align: 'right', render: (v) => inr(v) },
               ]} />
             )}
-            <div>
-              <Text strong>History</Text>
-              <Timeline style={{ marginTop: 12 }} items={historyItems(detail.history)} />
-            </div>
+            <ActivityTrail module="INVOICE" id={detail.id} refreshKey={detail} />
           </Space>
         )}
       </Drawer>

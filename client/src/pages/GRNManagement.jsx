@@ -6,6 +6,7 @@ import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import GRNDrawer from '../components/procurement/GRNDrawer';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const { Title, Text } = Typography;
 
@@ -57,11 +58,15 @@ const GRNManagement = () => {
     setDrawerOpen(true);
   };
 
+  const lastPo = useLastActions('PO', approvedPOs, approvedPOs);
+  const lastGrn = useLastActions('GRN', grns, grns);
+
   const poColumns = [
     { title: 'PO Number', dataIndex: 'po_number', key: 'po_number' },
     { title: 'Vendor', key: 'vendor', render: (_, r) => r?.Vendor?.vendor_name || '-' },
     { title: 'Amount', dataIndex: 'total_amount', key: 'total_amount', align: 'right', render: (v) => `₹${Number(v || 0).toLocaleString('en-IN')}` },
     { title: 'Status', dataIndex: 'status', key: 'status', render: (v) => <Tag color="processing">{v || 'APPROVED'}</Tag> },
+    lastActionColumn('PO', lastPo, { numberOf: (r) => r.po_number }),
     {
       title: 'Action',
       key: 'action',
@@ -93,6 +98,7 @@ const GRNManagement = () => {
         );
       }
     },
+    lastActionColumn('GRN', lastGrn, { numberOf: (r) => r.grn_number }),
     {
       title: 'Action', key: 'action', width: 90,
       render: (_, r) => (
@@ -175,6 +181,9 @@ const GRNManagement = () => {
               pagination={false}
               locale={{ emptyText: 'No line items' }}
             />
+            <div style={{ marginTop: 20 }}>
+              <ActivityTrail module="GRN" id={viewGrn.id} refreshKey={grns} />
+            </div>
           </>
         )}
       </Modal>

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const { Title, Text } = Typography;
 
@@ -48,6 +49,7 @@ const PurchaseOrder = () => {
   const [apprOpen, setApprOpen] = useState(false);
   const [apprData, setApprData] = useState(null);
   const [apprLoading, setApprLoading] = useState(false);
+  const [apprId, setApprId] = useState(null);
   const [cvPo, setCvPo] = useState(null);
   const [cvVendor, setCvVendor] = useState(null);
   const [cvReason, setCvReason] = useState('');
@@ -63,7 +65,7 @@ const PurchaseOrder = () => {
     finally { setCvSaving(false); }
   };
   const openApprovalStatus = async (id) => {
-    setApprOpen(true); setApprLoading(true); setApprData(null);
+    setApprOpen(true); setApprLoading(true); setApprData(null); setApprId(id);
     try { const res = await api.get(`/procurement/po/${id}/approval-status`); setApprData(res?.data?.data || res?.data || null); }
     catch { message.error('Failed to load approval status'); }
     finally { setApprLoading(false); }
@@ -247,6 +249,8 @@ const PurchaseOrder = () => {
     }
   };
 
+  const lastActions = useLastActions('PO', pos, pos);
+
   const columns = [
     { title: 'PO Number', dataIndex: 'po_number', key: 'po_number', render: (v) => <Tag color="blue">{v || '-'}</Tag> },
     { title: 'Reference', key: 'pr_reference', render: (_, r) => r?.PurchaseRequisition?.pr_number || '-' },
@@ -264,6 +268,7 @@ const PurchaseOrder = () => {
       key: 'status',
       render: (v) => <Tag color={STATUS_COLOR[v] || 'default'}>{v || '-'}</Tag>
     },
+    lastActionColumn('PO', lastActions, { numberOf: (r) => r.po_number }),
     {
       title: 'Action',
       key: 'action',
@@ -483,6 +488,9 @@ const PurchaseOrder = () => {
                 { title: 'Amount', key: 'amt', width: 130, align: 'right', render: (_, r) => '₹' + (Number(r.quantity || 0) * Number(r.unit_price || 0)).toLocaleString('en-IN') }
               ]}
             />
+            <div style={{ marginTop: 20 }}>
+              <ActivityTrail module="PO" id={viewPo.id} refreshKey={pos} />
+            </div>
           </>
         )}
       </Drawer>
@@ -546,6 +554,11 @@ const PurchaseOrder = () => {
               })}
             </div>
           )}
+        {apprOpen && apprId && (
+          <div style={{ marginTop: 20 }}>
+            <ActivityTrail module="PO" id={apprId} refreshKey={pos} />
+          </div>
+        )}
       </Drawer>
     </div>
   );

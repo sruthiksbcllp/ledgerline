@@ -4,6 +4,7 @@ import { Plus, RefreshCcw, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import PageHeader from '../components/PageHeader';
+import { lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const STATUS_COLOR = { DRAFT: 'default', SENT: 'blue', PARTIALLY_RESPONDED: 'gold', CLOSED: 'green', CANCELLED: 'red' };
 
@@ -22,12 +23,15 @@ export default function RfqManagement() {
   };
   useEffect(() => { load(); }, []);
 
+  const lastActions = useLastActions('RFQ', rows, rows);
+
   const columns = [
     { title: 'RFQ #', dataIndex: 'rfq_number', key: 'rfq_number' },
     { title: 'PR Number', dataIndex: 'pr_number', key: 'pr_number', render: (v) => v || <Tag color="default">Direct</Tag> },
     { title: 'Title', dataIndex: 'title', key: 'title' },
     { title: 'Vendors', key: 'vendors', render: (_, r) => (r.vendors ? r.vendors.length : 0) },
     { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={STATUS_COLOR[s] || 'default'}>{s}</Tag> },
+    lastActionColumn('RFQ', lastActions, { numberOf: (r) => r.rfq_number }),
     { title: 'Action', key: 'action', render: (_, r) => (
       <Button size="small" icon={<Eye size={14} />} onClick={() => navigate(`/procurement/rfq/${r.id}`)}>View</Button>
     ) }
@@ -41,7 +45,7 @@ export default function RfqManagement() {
           <Button type="primary" icon={<Plus size={16} />} style={{ background: 'var(--gradient-orange)', border: 'none' }} onClick={() => navigate('/procurement/rfq/create')}>Create RFQ</Button>
           <Button icon={<RefreshCcw size={16} />} onClick={load}>Refresh</Button>
         </Space>
-        <Table rowKey="id" loading={loading} columns={columns} dataSource={rows}
+        <Table rowKey="id" loading={loading} columns={columns} dataSource={rows} scroll={{ x: 'max-content' }}
           locale={{ emptyText: <Empty description="No RFQs yet" /> }}
           pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '25', '50'], showTotal: (t) => `${t} RFQs` }} />
       </Card>

@@ -4,6 +4,7 @@ import { Plus, RefreshCcw, Download, Upload as UploadIcon, Eye, FileText, Trash2
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const { Title, Text } = Typography;
 
@@ -180,6 +181,8 @@ const InvoiceProcessing = () => {
     }
   };
 
+  const lastActions = useLastActions('INVOICE', data, data);
+
   const columns = [
     { title: 'Invoice No', dataIndex: 'invoice_number', key: 'invoice_number' },
     {
@@ -235,6 +238,7 @@ const InvoiceProcessing = () => {
         </Space>
       )
     },
+    lastActionColumn('INVOICE', lastActions, { numberOf: (r) => r.invoice_number }),
     {
       title: 'Action',
       key: 'action',
@@ -381,9 +385,10 @@ const InvoiceProcessing = () => {
         title="Invoice Details"
         open={!!viewingInvoice}
         onClose={() => setViewingInvoice(null)}
-        width={480}
+        width={560}
       >
         {viewingInvoice && (
+          <>
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="Invoice No">{viewingInvoice.invoice_number || '—'}</Descriptions.Item>
             <Descriptions.Item label="PO">{viewingInvoice.po_number || viewingInvoice.po_id || '—'}</Descriptions.Item>
@@ -405,6 +410,10 @@ const InvoiceProcessing = () => {
               </Descriptions.Item>
             )}
           </Descriptions>
+          <div style={{ marginTop: 20 }}>
+            <ActivityTrail module="INVOICE" id={viewingInvoice.id} refreshKey={data} />
+          </div>
+          </>
         )}
       </Drawer>
 

@@ -419,3 +419,5 @@ function audit(req, ses, action, metadata) {
 
 exports.STAGES = STAGES;
 exports.blockReason = blockReason;
+
+exports.canSeeSes = canSeeSes; // used by the activity trail (workflow events)

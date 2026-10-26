@@ -5,6 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail } from '../components/procurement/ActivityTrail';
 import VendorEmailReview, { VendorEmailStatusTag } from '../components/procurement/VendorEmailReview';
 import ConnectEmailModal from '../components/settings/ConnectEmailModal';
 import RfqRepliesDrawer from '../components/procurement/RfqRepliesDrawer';
@@ -261,6 +262,11 @@ export default function RfqDetail() {
         </Space>
         <Table rowKey="id" title={() => 'Vendors & Responses'} columns={vendorCols} dataSource={rfq?.vendors || []} pagination={false} size="small" />
       </Card>
+      {rfq && (
+        <Card style={{ borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border-medium)', marginBottom: 16 }}>
+          <ActivityTrail module="RFQ" id={rfq.id} refreshKey={rfq} />
+        </Card>
+      )}
 
       <RfqEmailReviewModal
         open={!!review}

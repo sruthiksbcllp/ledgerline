@@ -42,4 +42,7 @@ Object.keys(db).forEach(modelName => {
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
+// Who-did-what trail on the AP documents (role, name, action, status, time).
+require('../services/workflowTrail.service').install(db);
+
 module.exports = db;

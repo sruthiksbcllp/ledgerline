@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import VendorEmailReview from '../components/procurement/VendorEmailReview';
 import PendingRepliesCard from '../components/procurement/PendingRepliesCard';
 
@@ -145,6 +146,8 @@ const QuotationManagement = () => {
     }
   };
 
+  const lastActions = useLastActions('QUOTATION', rows, rows);
+
   const columns = [
     {
       title: 'Quotation No', dataIndex: 'quotation_number', key: 'quotation_number',
@@ -166,6 +169,7 @@ const QuotationManagement = () => {
       title: 'Status', dataIndex: 'status', key: 'status',
       render: (v) => <Tag color={STATUS_COLOR[v] || 'default'}>{v || 'DRAFT'}</Tag>,
     },
+    lastActionColumn('QUOTATION', lastActions, { numberOf: (r) => r.quotation_number }),
     {
       title: 'Actions', key: 'actions', fixed: 'right', width: 150,
       render: (_, r) => (
@@ -349,7 +353,7 @@ const QuotationManagement = () => {
         title={"Quotation: " + (selected?.quotation_number || selected?.id || '')}
         onCancel={() => setViewOpen(false)}
         footer={<Button onClick={() => setViewOpen(false)}>Close</Button>}
-        width={600}
+        width={640}
         destroyOnClose
       >
         {selected && (
@@ -382,6 +386,8 @@ const QuotationManagement = () => {
                 />
               </>
             )}
+            <Divider style={{ margin: '12px 0' }} />
+            <ActivityTrail module="QUOTATION" id={selected.id} refreshKey={rows} />
           </div>
         )}
       </Modal>

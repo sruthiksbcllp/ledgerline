@@ -4,6 +4,7 @@ import { RefreshCcw, PlayCircle, Plus, GitMerge, Eye, Edit2 } from 'lucide-react
 import api from '../utils/api';
 import { safeApiCall } from '../utils/safeApiCall';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const { Title, Text } = Typography;
 
@@ -98,6 +99,8 @@ const ThreeWayMatch = () => {
     }
   };
 
+  const lastActions = useLastActions('INVOICE', invoices, invoices);
+
   const matchColumns = useMemo(() => ([
     { title: 'Invoice', dataIndex: 'invoice_number', key: 'invoice_number' },
     { title: 'PO', key: 'po_number', render: (_, r) => r.PurchaseOrder?.po_number || '-' },
@@ -111,6 +114,7 @@ const ThreeWayMatch = () => {
         return <Tag color={STATUS_COLORS[s] || 'default'}>{(s) ? (s).charAt(0)+(s).slice(1).toLowerCase() : '—'}</Tag>;
       }
     },
+    lastActionColumn('INVOICE', lastActions, { numberOf: (r) => r.invoice_number }),
     {
       title: 'Action',
       key: 'action',
@@ -125,7 +129,7 @@ const ThreeWayMatch = () => {
         </Space>
       )
     }
-  ]), []);
+  ]), [lastActions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ruleColumns = useMemo(() => ([
     { title: 'Rule', dataIndex: 'rule_name', key: 'rule_name' },
@@ -207,6 +211,9 @@ const ThreeWayMatch = () => {
                   showIcon
                 />
               )}
+              <div style={{ marginTop: 20 }}>
+                <ActivityTrail module="INVOICE" id={selectedRow.id} refreshKey={invoices} />
+              </div>
             </>
           )}
         </Drawer>

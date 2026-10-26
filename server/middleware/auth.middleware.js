@@ -73,7 +73,9 @@ exports.verifyToken = (req, res, next) => {
 
       log(`[AUTH SUCCESS] Verified: ${req.user.id}, Role: ${req.user.role}, Client: ${req.user.client_id}`);
       // Throttle authenticated traffic by VERIFIED user id (identity established above), not IP.
-      return userApiLimiter(req, res, next);
+      // The rest of the request runs inside the actor context, so workflow events name the person.
+      const requestContext = require('../utils/requestContext');
+      return requestContext.run(requestContext.fromRequest(req), () => userApiLimiter(req, res, next));
     } catch (error) {
        console.error('[AUTH ERROR] Internal failure:', error);
        return res.status(500).json({ success: false, message: 'Internal server error' });

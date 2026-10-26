@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Table, Tag, message, Empty, Typography, Space, Popconfirm, Descriptions, Badge, Timeline, Tooltip } from 'antd';
+import { Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Table, Tag, message, Empty, Typography, Space, Popconfirm, Descriptions, Badge, Tooltip } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { Plus, RefreshCcw, FileText, Eye, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import api from '../utils/api';
 import { getStoredUser, hasPerm } from '../utils/session';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
+import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -261,6 +262,8 @@ const PurchaseRequisition = () => {
     setViewOpen(true);
   };
 
+  const lastActions = useLastActions('PR', rows, rows);
+
   const columns = [
     {
       title: 'PR Number',
@@ -324,6 +327,7 @@ const PurchaseRequisition = () => {
         return <Tag color={STATUS_COLOR[v] || 'default'} style={{ borderRadius: 4 }}>{label}</Tag>;
       }
     },
+    lastActionColumn('PR', lastActions, { numberOf: (r) => r.pr_number }),
     {
       title: 'Actions',
       key: 'actions',
@@ -535,24 +539,7 @@ const PurchaseRequisition = () => {
               </div>
             )}
 
-            {viewRecord.approval_history && viewRecord.approval_history.length > 0 && (
-              <div>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>Approval History</Text>
-                <Timeline
-                  items={viewRecord.approval_history.map((h) => ({
-                    color: h.action === 'APPROVED' ? 'green' : h.action === 'REJECTED' ? 'red' : 'blue',
-                    children: (
-                      <div>
-                        <Text strong>{h.action}</Text>
-                        <Text type="secondary">{' by ' + (h.User ? ((h.User.first_name || '') + ' ' + (h.User.last_name || '')).trim() || 'System' : 'System')}</Text>
-                        {h.comments && <div><Text type="secondary" style={{ fontSize: 12 }}>{h.comments}</Text></div>}
-                        {h.timestamp && <div><Text type="secondary" style={{ fontSize: 11 }}>{new Date(h.timestamp).toLocaleString('en-IN')}</Text></div>}
-                      </div>
-                    )
-                  }))}
-                />
-              </div>
-            )}
+            <ActivityTrail module="PR" id={viewRecord.id} refreshKey={rows} />
           </>
         )}
       </Modal>
