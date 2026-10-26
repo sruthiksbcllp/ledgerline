@@ -87,3 +87,36 @@ exports.validate3WayMatch = async (po_id, grn_id, invoice_amount, options = {}) 
     }
   };
 };
+
+/**
+ * 3-way match for a service invoice: PO <-> approved Service Entry Sheet <-> invoice.
+ * The SES must belong to the PO and be APPROVED; the invoice's pre-tax amount must agree with the
+ * SES value (accepted quantity x PO price) within the amount tolerance.
+ */
+exports.validateSesMatch = async (po_id, ses_id, invoice_base_amount, options = {}) => {
+  const { PurchaseOrder, ServiceEntrySheet } = require('../models');
+  const amountPercent = Number(options.amountPercent ?? DEFAULT_TOLERANCES.amountPercent);
+  const tolerances = { amountPercent };
+  const fail = (msg) => ({ matched: false, error: msg, mismatches: [msg], tolerances });
+
+  const [po, ses] = await Promise.all([PurchaseOrder.findByPk(po_id), ServiceEntrySheet.findByPk(ses_id)]);
+  if (!po || !ses) return fail('Invalid PO or service entry sheet reference');
+  if (Number(ses.po_id) !== Number(po.id)) return fail('Service entry sheet does not belong to the selected PO');
+  if (ses.status !== 'APPROVED') return fail(`Service entry sheet ${ses.ses_number} is not approved yet (${ses.status})`);
+
+  const sesValue = Number(ses.total_value || 0);
+  const invAmount = Number(invoice_base_amount || 0);
+  const amountDiff = Math.abs(invAmount - sesValue);
+  const allowedDiff = sesValue * (amountPercent / 100);
+  const mismatches = amountDiff > allowedDiff
+    ? [`Invoice amount Rs.${invAmount} (before tax) vs approved service value Rs.${sesValue} exceeds ${amountPercent}% tolerance`]
+    : [];
+
+  return {
+    matched: mismatches.length === 0,
+    error: mismatches[0] || null,
+    mismatches,
+    tolerances,
+    metrics: { ses_value: sesValue, invoice_base_amount: invAmount, amount_diff: amountDiff, amount_allowed_diff: allowedDiff }
+  };
+};

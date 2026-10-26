@@ -1,6 +1,6 @@
 'use strict';
 
-const { Invoice, PurchaseOrder, GRN, ThreeWayMatch, APToleranceRule } = require('../models');
+const { Invoice, PurchaseOrder, GRN, ThreeWayMatch, APToleranceRule, ServiceEntrySheet } = require('../models');
 const ThreeWayMatchService = require('../services/ThreeWayMatchService');
 const { getClientId } = require('../utils/tenantFilter');
 
@@ -82,6 +82,7 @@ exports.getInvoiceStatuses = async (req, res) => {
       include: [
         { model: PurchaseOrder, attributes: ['id', 'po_number', 'total_amount'] },
         { model: GRN, attributes: ['id', 'grn_number'] },
+        { model: ServiceEntrySheet, attributes: ['id', 'ses_number', 'total_value'], required: false },
         { model: ThreeWayMatch, attributes: ['status', 'qty_variance', 'amount_variance', 'tolerance_pct', 'blocked_reason'], required: false }
       ],
       order: [['createdAt', 'DESC']]

@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Card, Row, Col, Typography, Space, Button, Form, Input,
   Tag, Divider, message, Alert
 } from 'antd';
 import {
-  ShieldCheck, Lock, LogOut, KeyRound, ShieldAlert, RefreshCcw
+  ShieldCheck, Lock, LogOut, KeyRound, ShieldAlert, RefreshCcw, PlugZap
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../store/authSlice';
 import api from '../utils/api';
+import IntegrationsPanel from '../components/settings/IntegrationsPanel';
 
 const { Title, Text } = Typography;
 
@@ -17,6 +18,8 @@ const pageHeaderCard = { borderRadius: 'var(--radius-lg)', border: '1px solid va
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)', marginBottom: 16 };
 const iconBadge = (bg) => ({ width: 40, height: 40, borderRadius: 'var(--radius-md)', background: bg || 'var(--color-bg-page)', border: bg ? 'none' : '1px solid var(--color-border)', display: 'grid', placeItems: 'center', flexShrink: 0 });
 const primaryBtn = { background: 'var(--gradient-orange)', border: 'none' };
+// Company admins manage integrations (the same roles the server allows).
+const INTEGRATION_ADMIN_ROLES = ['PROVIDER_ADMIN', 'DEV_ADMIN', 'SUPER_ADMIN', 'CLIENT_ADMIN', 'ADMIN'];
 
 const SecuritySettings = () => {
   const navigate = useNavigate();
@@ -29,6 +32,16 @@ const SecuritySettings = () => {
   const roleCode = storeUser?.role || JSON.parse(localStorage.getItem('user') || '{}')?.role || '';
   const username = storeUser?.username || JSON.parse(localStorage.getItem('user') || '{}')?.username || '';
   const mfaEnabled = storeUser?.mfa_enabled ?? false;
+  const canManageIntegrations = INTEGRATION_ADMIN_ROLES.includes(String(roleCode).toUpperCase().replace(/\s+/g, '_'));
+
+  // Result of a Zoho Books / NetSuite sign-in (the server redirects back here). Read once, then clean the URL.
+  const [params, setParams] = useSearchParams();
+  const [oauthResult] = useState(() => ({ connected: params.get('integration_connected'), error: params.get('integration_error') }));
+  useEffect(() => {
+    if (!oauthResult.connected && !oauthResult.error) return;
+    setParams({}, { replace: true });
+    setTimeout(() => document.getElementById('integrations')?.scrollIntoView({ behavior: 'smooth' }), 300);
+  }, [oauthResult, setParams]);
 
   const handleChangePassword = async (values) => {
     if (values.new_password !== values.confirm_password) {
@@ -212,6 +225,29 @@ const SecuritySettings = () => {
           </Card>
         </Col>
       </Row>
+
+      {canManageIntegrations && (
+        <Card
+          id="integrations"
+          style={contentCard}
+          title={
+            <Space>
+              <PlugZap size={15} color="var(--color-orange)" />
+              <Text strong style={{ fontSize: 14 }}>Integrations</Text>
+            </Space>
+          }
+          extra={<Text type="secondary" style={{ fontSize: 12 }}>Connect LedgerLine with the apps your company already uses</Text>}
+          styles={{ body: { padding: '16px 20px' } }}
+        >
+          {oauthResult.connected && (
+            <Alert type="success" showIcon closable style={{ marginBottom: 16 }} message="Connected" description="The account was verified with the provider and the connection is ready." />
+          )}
+          {oauthResult.error && (
+            <Alert type="error" showIcon closable style={{ marginBottom: 16 }} message="Not connected" description={oauthResult.error} />
+          )}
+          <IntegrationsPanel />
+        </Card>
+      )}
     </div>
   );
 };

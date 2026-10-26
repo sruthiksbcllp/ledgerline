@@ -6,6 +6,7 @@ module.exports = (sequelize) => {
       this.belongsTo(models.PurchaseOrder, { foreignKey: 'po_id' });
       this.belongsTo(models.Entity, { foreignKey: 'entity_id', as: 'Entity' });
       this.belongsTo(models.GRN, { foreignKey: 'grn_id' });
+      this.belongsTo(models.ServiceEntrySheet, { foreignKey: 'ses_id' }); // service receipt (instead of a GRN)
       this.belongsTo(models.Vendor, { foreignKey: 'vendor_id' });
       this.belongsTo(models.Property, { foreignKey: 'property_id' });
       this.belongsTo(models.Location, { foreignKey: 'location_id' }); // location arc
@@ -23,6 +24,7 @@ module.exports = (sequelize) => {
     location_id: { type: DataTypes.INTEGER, allowNull: true }, // location arc - from PO
     buyer_gstin: { type: DataTypes.STRING(15), allowNull: true }, // Phase D - place-of-supply GSTIN at booking
     property_id: { type: DataTypes.INTEGER, allowNull: false },
+    ses_id: { type: DataTypes.INTEGER, allowNull: true }, // approved Service Entry Sheet, for service POs
     invoice_date: { type: DataTypes.DATE },
     base_amount: { type: DataTypes.DECIMAL(15, 2) },
     gst_amount: { type: DataTypes.DECIMAL(15, 2) },

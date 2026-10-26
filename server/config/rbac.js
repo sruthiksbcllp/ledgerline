@@ -69,22 +69,26 @@ const PERMISSIONS = {
   ADMIN: { '*': { view: true, add: true, edit: true, delete: true } },
   REQUESTER: {
     PR: { view: true, add: true, edit: true, delete: false },
+    SES: { view: true, add: true, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   PROCUREMENT: {
     PR: { view: true, add: false, edit: false, delete: false },
     RFQ: { view: true, add: true, edit: true, delete: false },
     PO: { view: true, add: true, edit: true, delete: false },
+    SES: { view: true, add: true, edit: false, delete: false },
     VENDOR: { view: true, add: true, edit: true, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   MANAGER: {
     PR: { view: true, add: false, edit: true, delete: false },
+    SES: { view: true, add: false, edit: true, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   DIRECTOR_CFO: {
     PR: { view: true, add: false, edit: true, delete: false },
     PO: { view: true, add: false, edit: true, delete: false },
+    SES: { view: true, add: false, edit: true, delete: false },
     PAYMENT: { view: true, add: false, edit: true, delete: false },
     REPORT: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
@@ -102,6 +106,7 @@ const PERMISSIONS = {
   FINANCE: {
     PR: { view: true, add: false, edit: true, delete: false },
     FINANCE: { view: true, add: true, edit: true, delete: false },
+    SES: { view: true, add: false, edit: true, delete: false },
     PAYMENT: { view: true, add: false, edit: true, delete: false },
     AR: { view: true, add: true, edit: true, delete: false },
     REPORT: { view: true, add: false, edit: false, delete: false },
@@ -111,6 +116,7 @@ const PERMISSIONS = {
     PR: { view: true, add: false, edit: false, delete: false },
     PO: { view: true, add: false, edit: false, delete: false },
     GRN: { view: true, add: false, edit: false, delete: false },
+    SES: { view: true, add: true, edit: false, delete: false },
     INVOICE: { view: true, add: true, edit: true, delete: false },
     PAYMENT: { view: true, add: true, edit: false, delete: false },
     VENDOR: { view: true, add: false, edit: false, delete: false },

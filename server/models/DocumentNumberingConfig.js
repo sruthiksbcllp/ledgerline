@@ -7,7 +7,7 @@ module.exports = (sequelize, DataTypes) => {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     client_id: { type: DataTypes.INTEGER, allowNull: false },
     document_type: {
-      type: DataTypes.ENUM('PR', 'PO', 'GRN', 'QUOTATION', 'RFQ', 'INVOICE'),
+      type: DataTypes.ENUM('PR', 'PO', 'GRN', 'QUOTATION', 'RFQ', 'INVOICE', 'SES'),
       allowNull: false
     },
     prefix: { type: DataTypes.STRING(20), allowNull: false },

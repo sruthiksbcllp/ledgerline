@@ -25,6 +25,7 @@ const DEFAULTS = {
   QUOTATION: { prefix: 'QTN', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
   RFQ:       { prefix: 'RFQ', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
   INVOICE:   { prefix: 'INV', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  SES:       { prefix: 'SES', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
 };
 
 /**

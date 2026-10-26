@@ -349,6 +349,7 @@ const MainLayout = ({ children }) => {
         { key: '/procurement/purchase-orders', icon: <ShoppingCart size={16} />, label: 'Purchase Orders (PO)', hidden: !canSeeProcurement },
         { key: '/procurement/gate-entry', icon: <ShieldCheck size={16} />, label: 'Gate Entry & QC', hidden: !canSeeProcurement },
         { key: '/procurement/grn', icon: <PackageCheck size={16} />, label: 'Goods Receipt (GRN)', hidden: !canSeeProcurement },
+        { key: '/procurement/ses', icon: <ClipboardCheck size={16} />, label: 'Service Entry Sheet (SES)', hidden: !canSeeProcurement },
         { key: '/finance/ap/ai-invoices', icon: <Sparkles size={16} />, label: 'AI Invoice Processing', hidden: !canSeeApAutomation },
         { key: '/procurement/invoices', icon: <ReceiptIndianRupee size={16} />, label: 'Invoice Processing', hidden: !canSeeProcurement || features?.ENABLE_INVOICE_MODULE === false },
         { key: '/finance/three-way-match', icon: <GitMerge size={16} />, label: '3-Way Match', hidden: !canSeeFinance },

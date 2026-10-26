@@ -33,6 +33,13 @@ const READ_SCOPES = {
     WAREHOUSE: 'all', ACCOUNTS_PAYABLE: 'all', PROCUREMENT: 'all', FINANCE: 'all',
     DIRECTOR_CFO: 'all', MANAGEMENT: 'all'
   },
+  // Service entry sheets (service receipts against POs). Requesters (own) see the ones they recorded
+  // and those on POs raised from their own requisitions, so they can confirm the service.
+  SES: {
+    REQUESTER: 'own', PROCUREMENT: 'all', MANAGER: 'all', DIRECTOR_CFO: 'all', FINANCE: 'all',
+    ACCOUNTS_PAYABLE: 'all', COMPLIANCE: 'all', MANAGEMENT: 'all',
+    VENDOR: 'vendor'
+  },
   // Vendor invoices / accounts payable (Invoice Processing, AI invoices, 3-way match, payments)
   INVOICE: {
     ACCOUNTS_PAYABLE: 'all', FINANCE: 'all', DIRECTOR_CFO: 'all', MANAGER: 'all',

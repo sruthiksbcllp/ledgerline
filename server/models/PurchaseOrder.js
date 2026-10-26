@@ -10,6 +10,7 @@ module.exports = (sequelize) => {
       this.belongsTo(models.Entity, { foreignKey: 'entity_id', as: 'Entity' });
       this.belongsTo(models.Location, { foreignKey: 'location_id' }); // location arc
       this.hasMany(models.GRN, { foreignKey: 'po_id' });
+      this.hasMany(models.ServiceEntrySheet, { foreignKey: 'po_id' });
       this.hasMany(models.Invoice, { foreignKey: 'po_id' });
       this.hasMany(models.PurchaseOrderItem, { foreignKey: 'po_id', as: 'items', onDelete: 'CASCADE' });
     }

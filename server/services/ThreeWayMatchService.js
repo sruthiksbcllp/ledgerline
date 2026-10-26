@@ -2,7 +2,7 @@
 
 const { Op } = require('sequelize');
 const {
-  Invoice, PurchaseOrder, GRN, GRNItem, PurchaseOrderItem, ThreeWayMatch, APToleranceRule
+  Invoice, PurchaseOrder, GRN, GRNItem, PurchaseOrderItem, ThreeWayMatch, APToleranceRule, ServiceEntrySheet
 } = require('../models');
 
 const toNumber = (v) => Number(v || 0);
@@ -38,6 +38,7 @@ class ThreeWayMatchService {
     const po = await PurchaseOrder.findOne({
       where: { id: invoice.po_id, client_id: invoice.client_id }
     });
+    if (invoice.ses_id) return this.runServiceMatch(invoice, po);
     const grn = await GRN.findOne({
       where: { id: invoice.grn_id, client_id: invoice.client_id }
     });
@@ -107,11 +108,54 @@ class ThreeWayMatchService {
     };
   }
 
+  /**
+   * Service invoices: PO <-> approved Service Entry Sheet <-> invoice. Services have no counted
+   * quantity on the invoice, so the check is the invoice's pre-tax amount against the SES value
+   * (accepted quantity x PO price), within the active tolerance rule.
+   */
+  async runServiceMatch(invoice, po) {
+    const ses = await ServiceEntrySheet.findOne({ where: { id: invoice.ses_id, client_id: invoice.client_id } });
+    const base = {
+      invoice_id: invoice.id, po_id: invoice.po_id, grn_id: null, ses_id: invoice.ses_id,
+      client_id: invoice.client_id, qty_variance: 0, amount_variance: 0, tolerance_pct: 0, details: null
+    };
+    if (!po || !ses || Number(ses.po_id) !== Number(po.id)) {
+      return { ...base, status: 'BLOCKED', blocked_reason: 'Missing PO/service entry sheet' };
+    }
+    if (ses.status !== 'APPROVED') {
+      return { ...base, status: 'BLOCKED', blocked_reason: `Service entry sheet ${ses.ses_number} is not approved (${ses.status})` };
+    }
+
+    const sesValue = toNumber(ses.total_value);
+    const invoiceAmount = toNumber(invoice.base_amount);
+    const amountVariance = Math.abs(invoiceAmount - sesValue);
+    const rule = await this.getActiveRule(invoice.client_id);
+    const tolerancePct = toNumber(rule.tolerance_pct);
+    const amountThreshold = Math.max(sesValue * (tolerancePct / 100), toNumber(rule.tolerance_amount));
+    const breached = String(rule.applies_to || 'BOTH') !== 'QTY' && amountVariance > amountThreshold;
+
+    return {
+      ...base,
+      status: breached ? 'TOLERANCE_BREACH' : 'MATCHED',
+      blocked_reason: breached ? `Invoice amount before tax differs from the approved service value by ${amountVariance.toFixed(2)}` : null,
+      amount_variance: amountVariance.toFixed(2),
+      tolerance_pct: tolerancePct,
+      details: {
+        po_total_amount: toNumber(po.total_amount),
+        ses_number: ses.ses_number,
+        ses_value: sesValue,
+        invoice_base_amount: invoiceAmount,
+        amount_threshold: amountThreshold
+      }
+    };
+  }
+
   async createOrUpdateMatch(invoiceId, clientId) {
     const match = await this.runMatch(invoiceId, clientId);
     const payload = {
       po_id: match.po_id || null,
       grn_id: match.grn_id || null,
+      ses_id: match.ses_id || null,
       invoice_id: match.invoice_id,
       client_id: match.client_id || clientId,
       status: match.status,

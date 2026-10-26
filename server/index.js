@@ -181,6 +181,7 @@ app.use('/api/company-access', require('./routes/companyAccess.routes'));
 // Asset Management (Primary)
 
 // Procurement & Inventory
+app.use('/api/procurement/ses', require('./routes/serviceEntrySheet.routes')); // Service Entry Sheets (service receipts)
 app.use('/api/procurement', procurementRoutes);
 app.use('/api/ar', require('./routes/ar.routes')); // Accounts Receivable: customer invoices, receipts, reminders
 app.use('/api/rfqs', require('./routes/rfq.routes')); // CR-P01 RFQ module
@@ -200,6 +201,7 @@ app.use('/api/tds', require('./routes/tds.routes'));
 
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
 app.use('/api/integration', require('./routes/integration.routes'));
+app.use('/api/integrations', require('./routes/integrationConnection.routes')); // Settings → Integrations (company app connections)
 app.use('/api/public/approvals', require('./routes/publicApproval.routes')); // Phase 3 - external email-link approvals (NO auth)
 app.use('/api/numbering', require('./routes/numbering.routes'));
 app.use('/api/notification-settings', require('./routes/notification-settings.routes'));

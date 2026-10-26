@@ -31,6 +31,7 @@ const InvoiceProcessing = () => {
   const [data, setData] = useState([]);
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
+  const [sesList, setSesList] = useState([]); // approved service entry sheets of the selected PO
   const [open, setOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState(null);
   const [viewingInvoice, setViewingInvoice] = useState(null);
@@ -44,13 +45,16 @@ const InvoiceProcessing = () => {
   const [exReason, setExReason] = useState('');
   const [exSaving, setExSaving] = useState(false);
 
-  const openAdd = () => { setEditingInvoice(null); form.resetFields(); setGrns([]); setOpen(true); };
+  const openAdd = () => { setEditingInvoice(null); form.resetFields(); setGrns([]); setSesList([]); setOpen(true); };
   const openEdit = (record) => { setEditingInvoice(record); form.setFieldsValue(record); loadGrns(record.po_id); setOpen(true); };
 
+  // Receipt documents a PO invoice can be matched to: GRNs (goods) and approved SES (services).
   const loadGrns = async (poId) => {
-    if (!poId) { setGrns([]); return; }
+    if (!poId) { setGrns([]); setSesList([]); return; }
     try { const r = await api.get('/grn', { params: { po_id: poId } }); setGrns(normalizeResponse(r?.data)); }
     catch { setGrns([]); }
+    try { const r = await api.get('/procurement/ses', { params: { po_id: poId, status: 'APPROVED' } }); setSesList(normalizeResponse(r?.data)); }
+    catch { setSesList([]); }
   };
 
   const load = async () => {
@@ -341,10 +345,23 @@ const InvoiceProcessing = () => {
       >
         <Form form={form} layout="vertical" onFinish={submit}>
           <Form.Item name="po_id" label="PO" rules={[{ required: true, message: 'Please select a PO' }]}>
-            <Select placeholder="Select PO" onChange={(v) => { loadGrns(v); form.setFieldsValue({ grn_id: undefined }); }} options={pos.map((p) => ({ value: p.id, label: p.po_number || `PO-${p.id}` }))} />
+            <Select placeholder="Select PO" onChange={(v) => { loadGrns(v); form.setFieldsValue({ grn_id: undefined, ses_id: undefined }); }} options={pos.map((p) => ({ value: p.id, label: p.po_number || `PO-${p.id}` }))} />
           </Form.Item>
           <Form.Item name="grn_id" label="GRN (required for 3-way match)">
-            <Select allowClear placeholder="Select the GRN for this PO" options={grns.map((g) => ({ value: g.id, label: g.grn_number || `GRN-${g.id}` }))} notFoundContent="No GRN yet - receive goods first" />
+            <Select allowClear placeholder="Select the GRN for this PO" onChange={(v) => { if (v) form.setFieldsValue({ ses_id: null }); }} options={grns.map((g) => ({ value: g.id, label: g.grn_number || `GRN-${g.id}` }))} notFoundContent="No GRN yet - receive goods first" />
+          </Form.Item>
+          <Form.Item name="ses_id" label="Service Entry Sheet (for services, instead of a GRN)">
+            <Select
+              allowClear
+              placeholder="Select the approved SES for this PO"
+              onChange={(v) => {
+                if (!v) return;
+                const ses = sesList.find((x) => x.id === v);
+                form.setFieldsValue({ grn_id: null, ...(ses && !form.getFieldValue('base_amount') ? { base_amount: Number(ses.total_value || 0) } : {}) });
+              }}
+              options={sesList.map((x) => ({ value: x.id, label: `${x.ses_number} - Rs.${Number(x.total_value || 0).toLocaleString('en-IN')}` }))}
+              notFoundContent="No approved SES for this PO"
+            />
           </Form.Item>
           <Form.Item name="invoice_number" label="Invoice Number" rules={[{ required: true, message: 'Please enter invoice number' }]}>
             <Input placeholder="Enter invoice number" />

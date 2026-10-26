@@ -101,7 +101,7 @@ const ThreeWayMatch = () => {
   const matchColumns = useMemo(() => ([
     { title: 'Invoice', dataIndex: 'invoice_number', key: 'invoice_number' },
     { title: 'PO', key: 'po_number', render: (_, r) => r.PurchaseOrder?.po_number || '-' },
-    { title: 'GRN', key: 'grn_number', render: (_, r) => r.GRN?.grn_number || '-' },
+    { title: 'GRN / SES', key: 'grn_number', render: (_, r) => r.GRN?.grn_number || r.ServiceEntrySheet?.ses_number || '-' },
     { title: 'Invoice Amount', dataIndex: 'total_amount', key: 'total_amount' },
     {
       title: 'Status',
@@ -184,7 +184,9 @@ const ThreeWayMatch = () => {
                 dataSource={[
                 { label: 'Invoice Number', value: selectedRow.invoice_number },
                 { label: 'PO Number', value: selectedRow.PurchaseOrder?.po_number || '-' },
-                { label: 'GRN Number', value: selectedRow.GRN?.grn_number || '-' },
+                selectedRow.ServiceEntrySheet
+                  ? { label: 'Service Entry Sheet', value: selectedRow.ServiceEntrySheet.ses_number }
+                  : { label: 'GRN Number', value: selectedRow.GRN?.grn_number || '-' },
                 { label: 'PO Amount', value: selectedRow.PurchaseOrder?.total_amount || '-' },
                 { label: 'Invoice Amount', value: selectedRow.total_amount || '-' },
                 { label: 'Qty Variance', value: selectedRow.ThreeWayMatch?.qty_variance ?? '-' },

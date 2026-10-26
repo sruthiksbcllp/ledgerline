@@ -905,7 +905,8 @@ exports.getInvoiceById = async (req, res, next) => {
       where: { id: req.params.id, ...(client_id ? { client_id } : {}) },
       include: [
         { model: PurchaseOrder, attributes: ['id', 'po_number', 'vendor_id', 'total_amount'] },
-        { model: GRN, attributes: ['id', 'grn_number', 'status'] }
+        { model: GRN, attributes: ['id', 'grn_number', 'status'] },
+        { model: sequelize.models.ServiceEntrySheet, attributes: ['id', 'ses_number', 'status', 'total_value'], required: false }
       ]
     });
     if (!invoice || !(await canSeeRow(req, 'INVOICE', invoice, { vendor: 'vendor_id' }))) throw new AppError('Invoice not found', 404);
@@ -1306,6 +1307,28 @@ exports.createGateEntry = async (req, res) => {
 
 // Canonical mapping: ThreeWayMatchService result -> invoice status fields (single source of truth,
 // so the invoice's matching_status/payment block always agrees with the 3-Way Match page).
+/**
+ * A service invoice can only be linked to an approved SES of the same PO and company, and each
+ * SES is invoiced once (a rejected invoice frees it again). `exceptInvoiceId` skips the invoice
+ * being edited.
+ */
+async function assertSesInvoiceable(sesId, { clientId, poId, exceptInvoiceId } = {}) {
+  const { ServiceEntrySheet } = require('../models');
+  const ses = await ServiceEntrySheet.findByPk(sesId);
+  if (!ses || (clientId && Number(ses.client_id) !== Number(clientId))) throw new AppError('Service entry sheet not found', 404);
+  if (poId && Number(ses.po_id) !== Number(poId)) throw new AppError(`Service entry sheet ${ses.ses_number} belongs to a different PO`, 400);
+  if (ses.status !== 'APPROVED') throw new AppError(`Service entry sheet ${ses.ses_number} is not approved yet, so it cannot be invoiced`, 400);
+  const other = await Invoice.findOne({
+    where: {
+      ses_id: ses.id,
+      status: { [Op.ne]: 'REJECTED' },
+      ...(exceptInvoiceId ? { id: { [Op.ne]: exceptInvoiceId } } : {})
+    }
+  });
+  if (other) throw new AppError(`Service entry sheet ${ses.ses_number} is already invoiced on ${other.invoice_number}`, 400);
+  return ses;
+}
+
 function matchToInvoiceFields(match) {
   const matched = match && match.status === 'MATCHED';
   return {
@@ -1338,7 +1361,7 @@ exports.createInvoice = async (req, res, next) => {
 async function recordInvoice(body, req) {
   {
     const {
-      po_id, grn_id,
+      po_id, grn_id, ses_id,
       invoice_number, base_amount, gst_amount, property_id,
       hsn_sac_code, is_itc_eligible
     } = body;
@@ -1346,6 +1369,7 @@ async function recordInvoice(body, req) {
 
     if (!po_id) throw new AppError('PO is required', 400);
     if (!invoice_number) throw new AppError('Invoice number is required', 400);
+    if (grn_id && ses_id) throw new AppError('Link the invoice to a GRN (goods) or a service entry sheet (services), not both', 400);
 
     const baseAmount = Number(base_amount || 0);
     const gstAmountInput = Number(gst_amount || 0);
@@ -1389,9 +1413,10 @@ async function recordInvoice(body, req) {
     if (vendor.client_id && Number(vendor.client_id) !== Number(clientId)) {
       throw new AppError('Selected vendor does not belong to your tenant', 403);
     }
+    if (ses_id) await assertSesInvoiceable(ses_id, { clientId, poId: po_id });
 
-    // 2. 3-Way Match Validation (only when GRN is provided)
-    const { validate3WayMatch } = require('../utils/finance');
+    // 2. 3-Way Match Validation (when a GRN or an approved service entry sheet is provided)
+    const { validate3WayMatch, validateSesMatch } = require('../utils/finance');
     const tolerancePercent = Number(body.tolerance_percent ?? process.env.THREE_WAY_AMOUNT_TOLERANCE_PCT ?? 5);
     const match = grn_id
       ? await validate3WayMatch(po_id, grn_id, total_amount, {
@@ -1399,7 +1424,9 @@ async function recordInvoice(body, req) {
           unitPricePercent: Number(process.env.THREE_WAY_UNIT_PRICE_TOLERANCE_PCT || 5),
           quantityPercent: Number(process.env.THREE_WAY_QTY_TOLERANCE_PCT || 0)
         })
-      : { matched: true, error: null };
+      : ses_id
+        ? await validateSesMatch(po_id, ses_id, baseAmount, { amountPercent: tolerancePercent })
+        : { matched: true, error: null };
 
     // 3. GST/TDS Compliance Engine (CR-P03: property-level place of supply, flag-gated)
     const orgStateCode = String(process.env.ORG_GST_STATE_CODE || '').trim();
@@ -1432,6 +1459,7 @@ async function recordInvoice(body, req) {
       // Explicit columns only — no ...req.body spread (would pass 'items' array and unknown fields)
       po_id,
       grn_id: grn_id || null,
+      ses_id: ses_id || null,
       vendor_id,
       invoice_number,
       property_id: resolvedPropertyId,
@@ -1677,6 +1705,13 @@ exports.updateInvoice = async (req, res, next) => {
     if (req.body.invoice_date !== undefined) patch.invoice_date = req.body.invoice_date;
     if (req.body.hsn_sac_code !== undefined) patch.hsn_sac_code = req.body.hsn_sac_code;
     if (req.body.grn_id !== undefined) patch.grn_id = req.body.grn_id || null;
+    if (req.body.ses_id !== undefined) {
+      patch.ses_id = req.body.ses_id || null;
+      if (patch.ses_id) await assertSesInvoiceable(patch.ses_id, { clientId, poId: invoice.po_id, exceptInvoiceId: invoice.id });
+    }
+    if ((patch.grn_id !== undefined ? patch.grn_id : invoice.grn_id) && (patch.ses_id !== undefined ? patch.ses_id : invoice.ses_id)) {
+      throw new AppError('Link the invoice to a GRN (goods) or a service entry sheet (services), not both', 400);
+    }
     if (req.body.base_amount !== undefined || req.body.gst_amount !== undefined) {
       const base = Number(req.body.base_amount != null ? req.body.base_amount : invoice.base_amount || 0);
       const gst = Number(req.body.gst_amount != null ? req.body.gst_amount : invoice.gst_amount || 0);
@@ -1725,7 +1760,9 @@ exports.getInvoices = async (req, res, next) => {
         { model: PurchaseOrder },
         { model: Property, attributes: ['id', 'property_name'] },
         { model: Location, attributes: ['id', 'location_name'], required: false },
-        { model: Vendor }
+        { model: Vendor },
+        { model: GRN, attributes: ['id', 'grn_number'], required: false },
+        { model: sequelize.models.ServiceEntrySheet, attributes: ['id', 'ses_number', 'total_value'], required: false }
       ],
       order: [['createdAt', 'DESC']]
     });
