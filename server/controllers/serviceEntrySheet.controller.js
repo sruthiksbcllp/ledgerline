@@ -134,7 +134,7 @@ const withActions = (ses, user) => ({ ...ses.toJSON(), allowed_actions: allowedA
  * their requisitions - they are the ones who confirm the service was delivered.
  */
 const ownPoIdsSql = (userId) => sequelize.literal(
-  `(SELECT po.id FROM purchaseorders po JOIN purchaserequisitions pr ON pr.id = po.pr_id WHERE pr.requested_by_user_id = ${sequelize.escape(Number(userId))})`
+  `(SELECT po.id FROM purchaseorders po JOIN purchaserequisitions pr ON pr.id = po.pr_id WHERE pr.requestor_id = ${sequelize.escape(Number(userId))} OR pr.requested_by_user_id = ${sequelize.escape(Number(userId))})`
 );
 async function sesScopeWhere(req) {
   if (readScope(req.user?.role, 'SES') !== 'own') return scopeWhere(req, 'SES', { owner: 'created_by', vendor: 'vendor_id' });
@@ -143,8 +143,10 @@ async function sesScopeWhere(req) {
 async function canSeeSes(req, ses) {
   if (readScope(req.user?.role, 'SES') !== 'own') return canSeeRow(req, 'SES', ses, { owner: 'created_by', vendor: 'vendor_id' });
   if (Number(ses.created_by) === Number(req.user.id)) return true;
-  const po = await PurchaseOrder.findByPk(ses.po_id, { attributes: ['id'], include: [{ model: PurchaseRequisition, attributes: ['requested_by_user_id'], required: false }] });
-  return Number(po?.PurchaseRequisition?.requested_by_user_id) === Number(req.user.id);
+  const po = await PurchaseOrder.findByPk(ses.po_id, { attributes: ['id'], include: [{ model: PurchaseRequisition, attributes: ['requestor_id', 'requested_by_user_id'], required: false }] });
+  // The PR's owner is who raised it (requestor_id); requested_by_user_id is set when raised on someone's behalf.
+  const me = Number(req.user.id);
+  return Number(po?.PurchaseRequisition?.requestor_id) === me || Number(po?.PurchaseRequisition?.requested_by_user_id) === me;
 }
 
 async function loadForUser(req, id, transaction) {
