@@ -130,7 +130,8 @@ router.get('/invoices', requireRead('INVOICE'), activityLog('PROCUREMENT', 'MODU
 router.post('/invoices', rbacMiddleware(['ACCOUNTS_PAYABLE', 'FINANCE', 'VENDOR']), blockWhenFinancialYearClosed, asyncHandler(procurementController.createInvoice));
 router.post(
   '/invoices/:id/upload',
-  checkPermission('PR', 'EDIT'),
+  // Same roles that may record invoices (admins pass rbacMiddleware); a vendor only its own (controller).
+  rbacMiddleware(['ACCOUNTS_PAYABLE', 'FINANCE', 'VENDOR']),
   blockWhenFinancialYearClosed,
   (req, res, next) => {
     upload.single('file')(req, res, (err) => {

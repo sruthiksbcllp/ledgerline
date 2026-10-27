@@ -2168,7 +2168,7 @@ exports.uploadInvoiceDocument = async (req, res) => {
     const invoice = await Invoice.findOne({
       where: { id: req.params.id, client_id: clientId }
     });
-    if (!invoice) {
+    if (!invoice || !(await canSeeRow(req, 'INVOICE', invoice, { vendor: 'vendor_id' }))) {
       return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
     if (!req.file) {
