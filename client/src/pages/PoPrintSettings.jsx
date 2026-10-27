@@ -125,7 +125,7 @@ export default function PoPrintSettings() {
             <Col xs={24} md={8}><Form.Item name="approved_by_label" label="Approved-by label"><Input /></Form.Item></Col>
             <Col xs={24} md={8}><Form.Item name="is_active" label="Active" valuePropName="checked"><Switch /></Form.Item></Col>
           </Row>
-          <Form.Item name="footer_note" label="Footer note (optional)"><Input placeholder="e.g. This is a system-generated document" /></Form.Item>
+          <Form.Item name="footer_note" label="Footer note"><Input placeholder="e.g. This is a system-generated document" /></Form.Item>
           <Form.Item name="procurement_cc_email" label="Procurement CC email (copied on every PO emailed to a vendor)"><Input placeholder="e.g. procurement@yourcompany.com" /></Form.Item>
 
           <div style={{ display: 'flex', gap: 8 }}>

@@ -376,7 +376,7 @@ const ApInvoiceAutomation = () => {
               <Col xs={24} md={12}>
                 <Form.Item
                   name="po_id"
-                  label="Purchase order (optional)"
+                  label="Purchase order"
                   extra={extraction && h.po_number?.value && !matches.purchase_order
                     ? <Text type="warning" style={{ fontSize: 12 }}>Invoice mentions PO “{h.po_number.value}”, which was not found</Text>
                     : (matches.po_vendor_mismatch ? <Text type="danger" style={{ fontSize: 12 }}>This PO belongs to a different vendor</Text> : null)}
@@ -421,7 +421,7 @@ const ApInvoiceAutomation = () => {
                 </Form.Item>
               </Col>
               <Col xs={24} md={12}>
-                <Form.Item name="hsn_sac_code" label="HSN / SAC (optional)"><Input /></Form.Item>
+                <Form.Item name="hsn_sac_code" label="HSN / SAC"><Input /></Form.Item>
               </Col>
             </Row>
 

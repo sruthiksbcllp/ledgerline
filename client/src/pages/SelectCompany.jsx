@@ -305,7 +305,7 @@ const SelectCompany = () => {
               }))}
             />
           </Form.Item>
-          <Form.Item name="note" label="Message to the admin (optional)">
+          <Form.Item name="note" label="Message to the admin">
             <Input.TextArea rows={3} maxLength={500} showCount placeholder="e.g. I joined the finance team this week" />
           </Form.Item>
         </Form>

@@ -381,7 +381,7 @@ const ArCustomerInvoices = () => {
               <Col xs={12} md={6}><Form.Item name="total_amount" label="Invoice total" rules={[{ required: true, message: 'Required' }]} {...markProps(h.total_amount)}><InputNumber style={{ width: '100%' }} min={0} prefix="₹" /></Form.Item></Col>
             </Row>
             <Row gutter={16}>
-              <Col xs={24} md={8}><Form.Item name="customer_po_number" label="Customer PO no. (optional)"><Input /></Form.Item></Col>
+              <Col xs={24} md={8}><Form.Item name="customer_po_number" label="Customer PO no."><Input /></Form.Item></Col>
               <Col xs={12} md={8}><Form.Item name="amount_received" label="Amount already received" extra="Leave empty if nothing has been paid yet"><InputNumber style={{ width: '100%' }} min={0} prefix="₹" /></Form.Item></Col>
               <Col xs={12} md={8}><Form.Item name="payment_mode" label="Payment mode"><Select allowClear options={MODES} /></Form.Item></Col>
             </Row>

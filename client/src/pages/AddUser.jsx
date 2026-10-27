@@ -253,7 +253,7 @@ const AddUser = () => {
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item name="property_id" label={isPropertyRequired ? "Property" : "Property (optional)"} rules={[{ required: isPropertyRequired, message: 'Select a property' }]}>
+              <Form.Item name="property_id" label="Property" rules={[{ required: isPropertyRequired, message: 'Select a property' }]}>
                 <Select placeholder="Select property" disabled={isView} size="large" showSearch optionFilterProp="children">
                   {properties.map((p) => <Option key={p.id} value={p.id}>{p.property_name}</Option>)}
                 </Select>

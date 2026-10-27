@@ -358,12 +358,12 @@ const PurchaseOrder = () => {
               <Form.Item name="item_description" label="Item Description">
                 <Input.TextArea rows={2} placeholder="Describe items being ordered" />
               </Form.Item>
-              <Form.Item name="location_id" label="Location (optional)">
+              <Form.Item name="location_id" label="Location">
                 <Select allowClear showSearch optionFilterProp="children" placeholder="Select location">
                   {locations.map((l) => <Select.Option key={l.id} value={l.id}>{l.location_name || l.name}</Select.Option>)}
                 </Select>
               </Form.Item>
-              <Form.Item name="requestor_name" label="Requestor Name (optional)">
+              <Form.Item name="requestor_name" label="Requestor Name">
                 <Input placeholder="Actual requestor (if not a system user)" />
               </Form.Item>
             </>
@@ -430,7 +430,7 @@ const PurchaseOrder = () => {
             )}
           </div>
 
-          <Form.Item name="approval_comment" label="Comments for approver (optional)">
+          <Form.Item name="approval_comment" label="Comments for approver">
             <Input.TextArea rows={3} placeholder="Any note to include in the approval email sent to the approver" />
           </Form.Item>
           <Form.Item name="po_warranty" label="Warranty (optional — overrides department/tenant default)">
@@ -446,7 +446,7 @@ const PurchaseOrder = () => {
       </Modal>
 
       <Modal title="Approve Purchase Order" open={!!approveId} onCancel={() => setApproveId(null)} onOk={handleApprove} okText="Approve" okButtonProps={{ style: { background: 'var(--color-success)', border: 'none' } }}>
-        <Input.TextArea rows={3} placeholder="Add approval comments (optional)" value={comments} onChange={(e) => setComments(e.target.value)} />
+        <Input.TextArea rows={3} placeholder="Add approval comments" value={comments} onChange={(e) => setComments(e.target.value)} />
       </Modal>
 
       <Modal title="Reject Purchase Order" open={!!rejectId} onCancel={() => setRejectId(null)} onOk={handleReject} okText="Reject" okButtonProps={{ danger: true }}>
@@ -517,7 +517,7 @@ const PurchaseOrder = () => {
         <Select showSearch optionFilterProp="children" placeholder="New vendor" style={{ width: '100%', marginBottom: 12 }} value={cvVendor} onChange={setCvVendor}>
           {vendors.map((v) => <Select.Option key={v.id} value={v.id}>{v.vendor_name}</Select.Option>)}
         </Select>
-        <Input.TextArea rows={3} placeholder="Reason for vendor change (optional)" value={cvReason} onChange={(e) => setCvReason(e.target.value)} />
+        <Input.TextArea rows={3} placeholder="Reason for vendor change" value={cvReason} onChange={(e) => setCvReason(e.target.value)} />
       </Modal>
 
       <Drawer title="Approval Status" open={apprOpen} onClose={() => setApprOpen(false)} width={460} destroyOnClose>

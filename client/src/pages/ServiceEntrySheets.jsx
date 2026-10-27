@@ -351,15 +351,15 @@ const ServiceEntrySheets = () => {
               <Form.Item name="performed_by" label="Performed by (vendor contact)" style={{ flex: 1, minWidth: 260 }}>
                 <Input placeholder="Name or team at the vendor" />
               </Form.Item>
-              <Form.Item name="invoice_number" label="Vendor invoice number (optional)" style={{ flex: 1, minWidth: 260 }} tooltip="If given, the invoice is created in Invoice Processing when the SES is approved">
+              <Form.Item name="invoice_number" label="Vendor invoice number" style={{ flex: 1, minWidth: 260 }} tooltip="If given, the invoice is created in Invoice Processing when the SES is approved">
                 <Input placeholder="Invoice raised for this service" />
               </Form.Item>
             </Space>
             <Space style={{ width: '100%' }} size={16} align="start">
-              <Form.Item name="invoice_date" label="Invoice date (optional)" style={{ flex: 1, minWidth: 260 }}>
+              <Form.Item name="invoice_date" label="Invoice date" style={{ flex: 1, minWidth: 260 }}>
                 <DatePicker style={{ width: '100%' }} format="DD MMM YYYY" />
               </Form.Item>
-              <Form.Item label="Vendor invoice (optional)" style={{ flex: 1, minWidth: 260 }} tooltip="PDF, JPG or PNG up to 10 MB. It stays with this SES through confirmation, review and approval, and moves onto the invoice until it is paid." extra="Attach the bill now or later from View">
+              <Form.Item label="Vendor invoice" style={{ flex: 1, minWidth: 260 }} tooltip="PDF, JPG or PNG up to 10 MB. It stays with this SES through confirmation, review and approval, and moves onto the invoice until it is paid." extra="Attach the bill now or later from View">
                 <Upload
                   accept=".pdf,.jpg,.jpeg,.png"
                   maxCount={1}
@@ -418,7 +418,7 @@ const ServiceEntrySheets = () => {
               rows={3}
               value={actionText}
               onChange={(e) => setActionText(e.target.value)}
-              placeholder={action.key === 'reject' ? 'Reason for rejecting (required)' : 'Remarks (optional)'}
+              placeholder={action.key === 'reject' ? 'Reason for rejecting (required)' : 'Remarks'}
             />
             {action.key === 'approve' && (
               <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>

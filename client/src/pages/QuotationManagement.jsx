@@ -251,7 +251,7 @@ const QuotationManagement = () => {
             <Col xs={24} md={12}>
               <Form.Item name="pr_id" label="Purchase Requisition">
                 <Select
-                  placeholder="Select PR (optional)"
+                  placeholder="Select PR"
                   allowClear showSearch optionFilterProp="label"
                   options={prs.map((p) => ({ value: p.id, label: p.pr_number || ('PR-' + p.id) }))}
                 />
@@ -402,7 +402,7 @@ const QuotationManagement = () => {
               <p style={{ marginTop: 0 }}><b>{awardRow.quotation_number}</b>{awardRow.vendor?.vendor_name ? (" - " + awardRow.vendor.vendor_name) : ""}</p>
               <p>Amount: <b>{"\u20B9" + amt.toLocaleString("en-IN")}</b>{low != null && <span style={{ color: "var(--color-text-muted)" }}>{"  \u00B7  Lowest (L1): \u20B9" + Number(low).toLocaleString("en-IN")}</span>}</p>
               {isDeviation && <div style={{ background: "#fff7e6", border: "1px solid #faad14", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontSize: 13 }}>This is <b>not the lowest (L1)</b> quote - a justification is <b>required</b> to award it.</div>}
-              <Input.TextArea rows={3} placeholder={isDeviation ? "Reason for deviation from L1 (required)" : "Justification / remarks (optional)"} value={awardReason} onChange={(e) => setAwardReason(e.target.value)} />
+              <Input.TextArea rows={3} placeholder={isDeviation ? "Reason for deviation from L1 (required)" : "Justification / remarks"} value={awardReason} onChange={(e) => setAwardReason(e.target.value)} />
             </div>
           );
         })()}

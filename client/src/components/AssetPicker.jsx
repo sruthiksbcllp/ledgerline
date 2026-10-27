@@ -51,14 +51,14 @@ export default function AssetPicker({ value, onChange, onSelect, disabled }) {
     <Space direction="vertical" style={{ width: '100%' }} size={8}>
       <Select
         allowClear showSearch optionFilterProp="label" style={{ width: '100%' }} disabled={disabled}
-        placeholder="1. Filter by Property (optional)"
+        placeholder="1. Filter by Property"
         value={propertyId}
         onChange={(v) => { setPropertyId(v); setLocationId(undefined); }}
         options={properties.map((p) => ({ value: p.id, label: p.property_name || p.name }))}
       />
       <Select
         allowClear showSearch optionFilterProp="label" style={{ width: '100%' }} disabled={disabled}
-        placeholder="2. Filter by Location / Centre (optional)"
+        placeholder="2. Filter by Location / Centre"
         value={locationId}
         onChange={(v) => setLocationId(v)}
         options={filteredLocations.map((l) => ({ value: l.id, label: locName(l) + (l.location_code && l.location_name ? ` (${l.location_code})` : '') }))}

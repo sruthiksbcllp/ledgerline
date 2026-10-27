@@ -97,7 +97,7 @@ const AddDepartment = () => {
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item name="dept_code" label="Department Code (optional)" tooltip="Auto-generated if left blank">
+              <Form.Item name="dept_code" label="Department Code" tooltip="Auto-generated if left blank">
                 <Input placeholder="e.g. IT, HR, FIN" disabled={isEdit} />
               </Form.Item>
             </Col>

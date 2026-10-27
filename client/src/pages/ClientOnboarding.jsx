@@ -258,7 +258,7 @@ const ClientOnboarding = () => {
                   />
                 </Form.Item>
                 <Form.Item name="entity_id" label="Entity" tooltip="Link this client to a legal entity for immutable audit tracking">
-                  <Select placeholder="Select entity (optional)" allowClear showSearch optionFilterProp="children">
+                  <Select placeholder="Select entity" allowClear showSearch optionFilterProp="children">
                     {entities.map((e) => (
                       <Select.Option key={e.id} value={e.id}>
                         {e.entity_name}{e.entity_code ? ` (${e.entity_code})` : ''}

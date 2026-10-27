@@ -183,7 +183,7 @@ const NumberingConfig = () => {
               <Select options={[{ value: '-', label: '- (dash)' }, { value: '/', label: '/ (slash)' }, { value: '.', label: '. (dot)' }]} />
             </Form.Item>
           </div>
-          <Form.Item name="entity_code" label="Entity Code (optional)">
+          <Form.Item name="entity_code" label="Entity Code">
             <Input placeholder="e.g. MUM, HYD, INDIA" maxLength={20} />
           </Form.Item>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>

@@ -115,7 +115,7 @@ const AddProperty = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="gstin" label="GSTIN (optional)">
+              <Form.Item name="gstin" label="GSTIN">
                 <Input maxLength={15} placeholder="Property GSTIN" style={{ borderRadius: 'var(--radius-md)' }} />
               </Form.Item>
             </Col>

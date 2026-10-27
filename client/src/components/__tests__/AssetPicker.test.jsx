@@ -41,8 +41,8 @@ describe('AssetPicker (cascading Property -> Location -> Asset)', () => {
 
   it('renders the three cascading selects with the asset count once data loads', async () => {
     render(<AssetPicker />);
-    expect(screen.getByText('1. Filter by Property (optional)')).toBeInTheDocument();
-    expect(screen.getByText('2. Filter by Location / Centre (optional)')).toBeInTheDocument();
+    expect(screen.getByText('1. Filter by Property')).toBeInTheDocument();
+    expect(screen.getByText('2. Filter by Location / Centre')).toBeInTheDocument();
     // placeholder shows the filtered asset count -> proves fetch + normalize + filter pipeline ran
     await waitFor(() => expect(screen.getByText('3. Select Asset (2)')).toBeInTheDocument());
   });
@@ -51,7 +51,7 @@ describe('AssetPicker (cascading Property -> Location -> Asset)', () => {
     api.get.mockRejectedValue(new Error('network'));
     render(<AssetPicker />);
     await waitFor(() =>
-      expect(screen.getByText('1. Filter by Property (optional)')).toBeInTheDocument()
+      expect(screen.getByText('1. Filter by Property')).toBeInTheDocument()
     );
   });
 });

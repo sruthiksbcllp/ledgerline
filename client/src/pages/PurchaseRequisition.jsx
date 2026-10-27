@@ -546,7 +546,7 @@ const PurchaseRequisition = () => {
 
       {/* Approve Confirmation */}
       <Modal title="Approve Purchase Requisition" open={!!approveId} onCancel={() => setApproveId(null)} onOk={handleApprove} okText="Approve" okButtonProps={{ style: { background: 'var(--color-success)', border: 'none' } }}>
-        <Input.TextArea rows={3} placeholder="Add approval comments (optional)" value={comments} onChange={(e) => setComments(e.target.value)} />
+        <Input.TextArea rows={3} placeholder="Add approval comments" value={comments} onChange={(e) => setComments(e.target.value)} />
       </Modal>
 
       {/* Reject Confirmation */}
