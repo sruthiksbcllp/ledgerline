@@ -391,28 +391,28 @@ const PurchaseRequisition = () => {
       <Modal title="Create Purchase Requisition" open={open} onCancel={() => setOpen(false)} onOk={() => form.submit()} destroyOnClose okText="Create PR" okButtonProps={primaryBtn} width={600}>
         <Form form={form} layout="vertical" onFinish={submit}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-            <Form.Item name="entity_name" label="Entity">
+            <Form.Item name="entity_name" label="Entity" rules={[{ required: true, whitespace: true, message: 'Enter an entity' }]}>
               <Input placeholder="Enter entity" />
             </Form.Item>
             <Form.Item name="property_name" label="Property" rules={[{ required: true, message: 'Enter a property' }]}>
               <Input placeholder="Enter property" />
             </Form.Item>
-            <Form.Item name="location_name" label="Location">
+            <Form.Item name="location_name" label="Location" rules={[{ required: true, whitespace: true, message: 'Enter a location' }]}>
               <Input placeholder="Enter location" />
             </Form.Item>
             <Form.Item name="department_name" label="Department" rules={[{ required: true, message: 'Enter a department' }]}>
               <Input placeholder="Enter department" />
             </Form.Item>
-            <Form.Item name="requested_by_name" label="Requested By">
+            <Form.Item name="requested_by_name" label="Requested By" rules={[{ required: true, whitespace: true, message: 'Enter who is requesting' }]}>
               <Input placeholder="Enter the requestor" />
             </Form.Item>
-            <Form.Item name="requestor_name" label="Requestor Name">
+            <Form.Item name="requestor_name" label="Requestor Name" rules={[{ required: true, whitespace: true, message: 'Enter the requestor name' }]}>
               <Input placeholder="Actual requestor (if not a system user)" />
             </Form.Item>
             <Form.Item name="asset_name" label="Asset Name">
               <Input placeholder="Enter asset name" />
             </Form.Item>
-            <Form.Item name="procurement_type" label="Procurement Type" initialValue="DIRECT">
+            <Form.Item name="procurement_type" label="Procurement Type" initialValue="DIRECT" rules={[{ required: true, message: 'Choose the procurement type' }]}>
               <Select>
                 <Option value="DIRECT">Direct (single vendor)</Option>
                 <Option value="RFQ">RFQ (request quotes from multiple)</Option>
@@ -432,21 +432,21 @@ const PurchaseRequisition = () => {
               <Input placeholder="Enter cost center" />
             </Form.Item>
           </div>
-          <Form.Item name="type" label="Expense Type" initialValue="CAPEX">
+          <Form.Item name="type" label="Expense Type" initialValue="CAPEX" rules={[{ required: true, message: 'Choose the expense type' }]}>
             <Select>
               <Option value="CAPEX">Capex (asset purchase)</Option>
               <Option value="OPEX">Opex (services / consumables / rentals / licenses)</Option>
             </Select>
           </Form.Item>
-          <Form.Item name="required_date" label="Required Date">
+          <Form.Item name="required_date" label="Required Date" rules={[{ required: true, message: 'Select the date it is needed by' }]}>
             <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
           </Form.Item>
           <div style={{ marginBottom: 6, fontWeight: 500 }}>Items</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.4fr) 84px minmax(0,1fr) minmax(0,1.2fr) 34px', gap: '0 10px', marginBottom: 4, fontSize: 12, color: 'var(--color-text-muted)' }}>
             <div>Item Name <span style={{ color: 'var(--color-danger)' }}>*</span></div>
-            <div>Qty</div>
-            <div>Unit (UOM)</div>
-            <div>Estimated Cost</div>
+            <div>Qty <span style={{ color: 'var(--color-danger)' }}>*</span></div>
+            <div>Unit (UOM) <span style={{ color: 'var(--color-danger)' }}>*</span></div>
+            <div>Estimated Cost <span style={{ color: 'var(--color-danger)' }}>*</span></div>
             <div />
           </div>
           <Form.List name="items" initialValue={[{ quantity: 1, unit: 'Nos', estimated_cost: 0 }]}>
@@ -457,13 +457,13 @@ const PurchaseRequisition = () => {
                     <Form.Item {...rest} name={[name, 'item_name']} rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 10 }}>
                       <Input placeholder="e.g., Office Chair" />
                     </Form.Item>
-                    <Form.Item {...rest} name={[name, 'quantity']} initialValue={1} style={{ marginBottom: 10 }}>
+                    <Form.Item {...rest} name={[name, 'quantity']} initialValue={1} rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'More than 0' }]} style={{ marginBottom: 10 }}>
                       <InputNumber min={0} style={{ width: '100%' }} />
                     </Form.Item>
-                    <Form.Item {...rest} name={[name, 'unit']} initialValue="Nos" style={{ marginBottom: 10 }}>
+                    <Form.Item {...rest} name={[name, 'unit']} initialValue="Nos" rules={[{ required: true, whitespace: true, message: 'Required' }]} style={{ marginBottom: 10 }}>
                       <Input placeholder="Nos" />
                     </Form.Item>
-                    <Form.Item {...rest} name={[name, 'estimated_cost']} initialValue={0} style={{ marginBottom: 10 }}>
+                    <Form.Item {...rest} name={[name, 'estimated_cost']} initialValue={0} rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'More than 0' }]} style={{ marginBottom: 10 }}>
                       <InputNumber min={0} style={{ width: '100%' }} />
                     </Form.Item>
                     <Button danger type="text" icon={<Trash2 size={16} />} onClick={() => remove(name)} disabled={fields.length === 1} style={{ marginTop: 2, padding: 0 }} />
