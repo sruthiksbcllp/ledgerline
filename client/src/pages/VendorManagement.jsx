@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, Form, Input, Modal, Space, Table, Tag, message, Empty, Row, Col, Popconfirm, Typography, Statistic, Tooltip, Badge, Select, Upload, Alert } from 'antd';
-import { Plus, RefreshCcw, Trash2, Building2, Edit2, ShieldCheck, Tags, Sparkles } from 'lucide-react';
+import { Button, Card, Form, Input, Modal, Space, Table, Tag, message, Empty, Row, Col, Popconfirm, Typography, Statistic, Tooltip, Badge, Select, Upload, Alert, Descriptions } from 'antd';
+import { Plus, RefreshCcw, Trash2, Building2, Edit2, ShieldCheck, Tags, Sparkles, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { getStoredUser, hasPerm } from '../utils/session';
@@ -16,6 +16,17 @@ const STATUS_COLOR = {
   INACTIVE: 'error',
   SUSPENDED: 'warning'
 };
+
+// Compliance verification of the details a vendor submitted (same roles the server allows).
+const COMPLIANCE_TEAM_ROLES = ['COMPLIANCE', 'SUPER_ADMIN', 'CLIENT_ADMIN', 'ADMIN', 'PROVIDER_ADMIN', 'DEV_ADMIN'];
+const VERIFICATION = {
+  VERIFIED: { color: 'success', label: 'Verified' },
+  REJECTED: { color: 'error', label: 'Rejected' },
+  PENDING: { color: 'gold', label: 'Pending verification' },
+};
+const verificationOf = (status) => VERIFICATION[status] || VERIFICATION.PENDING;
+const personName = (u) => (u ? `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email : null);
+const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '');
 
 // Form fields the AI auto-fill can populate from an uploaded document.
 const AI_FIELD_KEYS = ['vendor_name', 'contact_person', 'email', 'phone', 'address', 'gst_number', 'pan_number', 'bank_name', 'bank_account_no', 'ifsc_code'];
@@ -39,6 +50,42 @@ const VendorManagement = () => {
   const [aiFields, setAiFields] = useState({});
   const [aiSummary, setAiSummary] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+
+  // Compliance review of vendor-submitted details
+  const isComplianceTeam = COMPLIANCE_TEAM_ROLES.includes(String(getStoredUser()?.role || '').toUpperCase().replace(/\s+/g, '_'));
+  const [reviewVendor, setReviewVendor] = useState(null);
+  const [reviewDocs, setReviewDocs] = useState([]);
+  const [reviewRemarks, setReviewRemarks] = useState('');
+  const [reviewBusy, setReviewBusy] = useState(null);
+
+  const openReview = async (vendor) => {
+    setReviewVendor(vendor);
+    setReviewRemarks('');
+    setReviewDocs([]);
+    try {
+      const res = await api.get(`/masters/vendors/${vendor.id}/documents`);
+      setReviewDocs(normalizeResponse(res?.data));
+    } catch {
+      // documents are optional for the review
+    }
+  };
+  const decide = async (decision) => {
+    if (decision === 'REJECT' && !reviewRemarks.trim()) {
+      message.warning('Enter the reason for rejecting');
+      return;
+    }
+    setReviewBusy(decision);
+    try {
+      const res = await api.put(`/masters/vendors/${reviewVendor.id}/verification`, { decision, remarks: reviewRemarks });
+      message.success(res?.data?.message || 'Saved');
+      setReviewVendor(null);
+      load(true);
+    } catch (e) {
+      message.error(e?.response?.data?.message || 'Could not save the verification');
+    } finally {
+      setReviewBusy(null);
+    }
+  };
 
   const resetAutoFill = () => { setAiFields({}); setAiSummary(null); };
 
@@ -216,7 +263,22 @@ const VendorManagement = () => {
 
   const columns = [
     { title: 'Vendor Code', dataIndex: 'vendor_code', key: 'vendor_code', width: 140, sorter: (a, b) => (a.vendor_code || '').localeCompare(b.vendor_code || '') },
-    { title: 'Vendor Name', dataIndex: 'vendor_name', key: 'vendor_name', sorter: (a, b) => (a.vendor_name || '').localeCompare(b.vendor_name || '') },
+    {
+      title: 'Vendor Name', dataIndex: 'vendor_name', key: 'vendor_name',
+      sorter: (a, b) => (a.vendor_name || '').localeCompare(b.vendor_name || ''),
+      render: (name, r) => {
+        const v = verificationOf(r.verification_status);
+        let tip = 'Waiting for Compliance Team approval';
+        if (r.verification_status === 'VERIFIED') tip = `Verified by ${personName(r.Verifier) || 'Compliance'} on ${when(r.verified_at)}`;
+        if (r.verification_status === 'REJECTED') tip = `Rejected by ${personName(r.Verifier) || 'Compliance'}: ${r.verification_remarks || ''}`;
+        return (
+          <div>
+            <div>{name}</div>
+            <Tooltip title={tip}><Tag color={v.color} style={{ marginTop: 4, fontSize: 11 }}>{v.label}</Tag></Tooltip>
+          </div>
+        );
+      }
+    },
     { title: 'GSTIN', dataIndex: 'gst_number', key: 'gst_number' },
     { title: 'PAN', dataIndex: 'pan_number', key: 'pan_number' },
     { title: 'Email', dataIndex: 'email', key: 'email' },
@@ -247,6 +309,11 @@ const VendorManagement = () => {
               <Button type="text" size="small" icon={<Trash2 size={15} color="var(--color-danger)" />} />
             </Tooltip>
           </Popconfirm>
+          {isComplianceTeam && (
+            <Tooltip title={r.verification_status === 'VERIFIED' ? 'Verified — review again' : 'Approve vendor details (Compliance)'}>
+              <Button type="text" size="small" icon={<BadgeCheck size={15} color="var(--color-success)" />} onClick={() => openReview(r)} />
+            </Tooltip>
+          )}
         </Space>
       )
     }
@@ -308,6 +375,61 @@ const VendorManagement = () => {
           scroll={{ x: 'max-content' }}
         />
       </Card>
+
+      <Modal
+        open={!!reviewVendor}
+        title={<Space><BadgeCheck size={18} color="var(--color-success)" /><span>Compliance verification — {reviewVendor?.vendor_name}</span></Space>}
+        onCancel={() => setReviewVendor(null)}
+        width={680}
+        destroyOnHidden
+        footer={[
+          <Button key="cancel" onClick={() => setReviewVendor(null)}>Cancel</Button>,
+          <Button key="reject" danger loading={reviewBusy === 'REJECT'} disabled={!!reviewBusy} onClick={() => decide('REJECT')}>Reject</Button>,
+          <Button key="approve" type="primary" loading={reviewBusy === 'APPROVE'} disabled={!!reviewBusy} onClick={() => decide('APPROVE')}>Approve</Button>,
+        ]}
+      >
+        {reviewVendor && (
+          <>
+            <Text type="secondary">Check the details the vendor submitted. The vendor shows as Verified only after the Compliance Team approves.</Text>
+            <div style={{ margin: '8px 0 12px' }}>
+              Current status: <Tag color={verificationOf(reviewVendor.verification_status).color}>{verificationOf(reviewVendor.verification_status).label}</Tag>
+              {reviewVendor.verified_at && <Text type="secondary" style={{ fontSize: 12 }}>{personName(reviewVendor.Verifier) || 'Compliance'} · {when(reviewVendor.verified_at)}</Text>}
+            </div>
+            <Descriptions bordered size="small" column={2}>
+              <Descriptions.Item label="Vendor name" span={2}>{reviewVendor.vendor_name}</Descriptions.Item>
+              <Descriptions.Item label="Vendor code">{reviewVendor.vendor_code || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Status">{reviewVendor.status || '—'}</Descriptions.Item>
+              <Descriptions.Item label="GSTIN">
+                {reviewVendor.gst_number || <Text type="danger">Not submitted</Text>}
+                {reviewVendor.gst_number && reviewVendor.gstin_status && (
+                  <Tag style={{ marginLeft: 6 }} color={reviewVendor.gstin_status === 'VALID' ? 'success' : 'warning'}>{reviewVendor.gstin_status}</Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="PAN">{reviewVendor.pan_number || <Text type="danger">Not submitted</Text>}</Descriptions.Item>
+              <Descriptions.Item label="Contact person">{reviewVendor.contact_person || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Phone">{reviewVendor.phone || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Email" span={2}>{reviewVendor.email || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Address" span={2}>{reviewVendor.address || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Bank">{reviewVendor.bank_name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="IFSC">{reviewVendor.ifsc_code || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Account number" span={2}>{reviewVendor.bank_account_no || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Documents" span={2}>
+                {reviewDocs.length
+                  ? reviewDocs.map((d) => <Tag key={d.id}>{d.document_type}: {d.document_name}</Tag>)
+                  : <Text type="secondary">No documents uploaded</Text>}
+              </Descriptions.Item>
+            </Descriptions>
+            {reviewVendor.verification_status === 'REJECTED' && reviewVendor.verification_remarks && (
+              <Alert style={{ marginTop: 12 }} type="error" showIcon message="Previously rejected" description={reviewVendor.verification_remarks} />
+            )}
+            <div style={{ marginTop: 16 }}>
+              <Text strong>Remarks</Text> <Text type="secondary" style={{ fontSize: 12 }}>(required to reject)</Text>
+              <Input.TextArea rows={3} maxLength={500} showCount value={reviewRemarks} onChange={(e) => setReviewRemarks(e.target.value)}
+                placeholder="e.g. PAN and GSTIN match the certificates; bank checked against cancelled cheque" style={{ marginTop: 6 }} />
+            </div>
+          </>
+        )}
+      </Modal>
 
       <Modal open={!!catVendor} title={`Categories — ${catVendor?.vendor_name || ''}`} onCancel={() => setCatVendor(null)} onOk={saveCategories} confirmLoading={catSaving} okText="Save" destroyOnClose>
         <p style={{ color: 'var(--color-text-muted)' }}>Item/asset categories this vendor supplies (drives PR/RFQ vendor suggestions).</p>

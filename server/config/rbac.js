@@ -95,7 +95,8 @@ const PERMISSIONS = {
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   COMPLIANCE: {
-    VENDOR: { view: true, add: false, edit: true, delete: false },
+    // Onboards vendors (Add Vendor) and verifies their submitted details (Vendor Master → Approve)
+    VENDOR: { view: true, add: true, edit: true, delete: false },
     AUDIT: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },

@@ -60,3 +60,6 @@ server/server_debug.log
 # FT-008/FT-001 forensic tool output — may contain tenant data, never commit
 forensic-ft001-report.json
 server/forensic-ft001-report.json
+
+# Uploaded documents (vendor invoices, logos) - user data, never committed
+server/uploads/

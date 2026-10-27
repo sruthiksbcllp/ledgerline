@@ -5,6 +5,7 @@ module.exports = (sequelize) => {
     static associate(models) {
       this.hasMany(models.PurchaseOrder, { foreignKey: 'vendor_id' });
       this.hasMany(models.Invoice, { foreignKey: 'vendor_id' });
+      this.belongsTo(models.User, { foreignKey: 'verified_by', as: 'Verifier', constraints: false });
     }
   }
 
@@ -36,6 +37,11 @@ module.exports = (sequelize) => {
     gstin_status: { type: DataTypes.STRING(30), defaultValue: 'UNVERIFIED' },
     gstin_validated_at: { type: DataTypes.DATE },
     status: { type: DataTypes.ENUM('DRAFT', 'ACTIVE', 'BLACKLISTED'), defaultValue: 'DRAFT' },
+    // Compliance Team review of the details the vendor submitted (set only via PUT /vendors/:id/verification)
+    verification_status: { type: DataTypes.ENUM('PENDING', 'VERIFIED', 'REJECTED'), allowNull: false, defaultValue: 'PENDING' },
+    verified_by: { type: DataTypes.INTEGER, allowNull: true },
+    verified_at: { type: DataTypes.DATE, allowNull: true },
+    verification_remarks: { type: DataTypes.STRING(500), allowNull: true },
     client_id: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 }
   }, {
     sequelize,

@@ -152,6 +152,7 @@ router.get('/vendors/:id/risk-history', masterController.getVendorRiskHistory);
 router.get('/vendors/:id/change-requests', masterController.getVendorChangeRequests);
 router.get('/vendors/:id', masterController.getVendorById);
 router.get('/vendors/:id/assets', masterController.getVendorAssets);
+router.put('/vendors/:id/verification', masterController.verifyVendor); // Compliance Team approval of vendor-submitted details
 router.put('/vendors/:id/assets', masterController.updateVendorAssets);
 router.post('/vendors', vendorValidator, validate, masterController.createVendor);
 router.put('/vendors/:id', vendorValidator, validate, masterController.updateVendor);

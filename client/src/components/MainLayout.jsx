@@ -157,7 +157,8 @@ const MainLayout = ({ children }) => {
   // and future modules). Visible whenever any vendor-consuming module is enabled AND the role deals with
   // vendors — NOT gated on the Procurement feature flag.
   const usesVendors = !features || ['PROCUREMENT_MODULE','MAINTENANCE_MODULE','INSURANCE_MODULE','AMC_MODULE','ASSET_MODULE'].some((k) => features[k] !== false);
-  const canManageVendors = usesVendors && (canSeeMasters || canSeeProcurement || canSeeMaintenance);
+  // Compliance onboards vendors and verifies their details.
+  const canManageVendors = usesVendors && (canSeeMasters || canSeeProcurement || canSeeMaintenance || normalizedRole === 'COMPLIANCE');
   const _canManageUsers = hasPermission('USERS', 'VIEW') || hasPermission('ROLES', 'VIEW') || isAdmin;
 
   useEffect(() => {

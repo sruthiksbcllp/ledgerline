@@ -458,6 +458,23 @@ exports.createAssetType = createItem(AssetType, { globalLookup: true });
 exports.updateAssetType = updateItem(AssetType, { globalLookup: true });
 exports.deleteAssetType = deleteItem(AssetType, { globalLookup: true });
 
+// ─── Compliance verification of vendor-submitted details ─────────────────────
+// Only the Compliance Team (and company admins) may approve or reject; the status can't be set
+// through ordinary create/edit, and changing the vendor's identity or bank details puts it back
+// to PENDING so it must be verified again.
+const COMPLIANCE_TEAM_ROLES = ['COMPLIANCE', 'SUPER_ADMIN', 'CLIENT_ADMIN', 'ADMIN', 'PROVIDER_ADMIN', 'DEV_ADMIN'];
+const VERIFICATION_FIELDS = ['verification_status', 'verified_by', 'verified_at', 'verification_remarks'];
+const VERIFIED_DETAIL_FIELDS = ['vendor_name', 'gst_number', 'pan_number', 'bank_name', 'bank_account_no', 'ifsc_code'];
+const REVERIFY = { verification_status: 'PENDING', verified_by: null, verified_at: null, verification_remarks: null };
+const withoutVerification = (body = {}) => {
+  const copy = { ...body };
+  VERIFICATION_FIELDS.forEach((f) => { delete copy[f]; });
+  return copy;
+};
+const verifiedDetailsChanged = (before, update) => VERIFIED_DETAIL_FIELDS.some((f) =>
+  Object.prototype.hasOwnProperty.call(update, f) && String(update[f] ?? '').trim() !== String(before[f] ?? '').trim());
+const isComplianceTeam = (role) => COMPLIANCE_TEAM_ROLES.includes(String(role || '').toUpperCase().replace(/\s+/g, '_'));
+
 exports.getAllVendors = async (req, res) => {
   try {
     const where = { ...buildWhere(req), status: { [Op.ne]: 'INACTIVE' } };
@@ -466,7 +483,7 @@ exports.getAllVendors = async (req, res) => {
       if (!owner?.vendor_id) return res.json({ success: true, data: [] });
       where.id = owner.vendor_id;
     }
-    const data = await Vendor.findAll({ where });
+    const data = await Vendor.findAll({ where, include: [{ model: User, as: 'Verifier', attributes: ['id', 'first_name', 'last_name', 'email'], required: false }] });
     return res.json({ success: true, data });
   } catch (err) {
     return error(res, err.message || 'Failed to fetch vendors');
@@ -475,7 +492,7 @@ exports.getAllVendors = async (req, res) => {
 exports.getVendorById = getById(Vendor);
 exports.createVendor = async (req, res) => {
   try {
-    const payload = { ...req.body, client_id: req.user?.client_id || req.body.client_id || 1 };
+    const payload = { ...withoutVerification(req.body), client_id: req.user?.client_id || req.body.client_id || 1 };
     const data = await Vendor.create(payload);
     const GSTService = require('../services/GSTService');
     GSTService.validateVendorGSTIN(data.gst_number, payload.client_id).then(async (gstResult) => {
@@ -508,14 +525,15 @@ exports.updateVendor = async (req, res) => {
     const item = await Vendor.findOne({ where });
     if (!item) return error(res, 'Vendor not found', 404);
     const before = item.get({ plain: true });
-    const candidateAfter = { ...before, ...req.body };
+    const body = withoutVerification(req.body);
+    const candidateAfter = { ...before, ...body };
     clearCache(`master_vendor_${req.user?.client_id || 'global'}`);
 
     const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
     const requiresApproval = !isSuperAdmin && needsVendorApproval(before, candidateAfter);
 
     if (!requiresApproval) {
-      await item.update(req.body);
+      await item.update(verifiedDetailsChanged(before, body) ? { ...body, ...REVERIFY } : body);
       clearCache(`master_vendor_${item.client_id || 'global'}`);
       clearCache('master_vendor_global');
     }
@@ -549,7 +567,7 @@ exports.updateVendor = async (req, res) => {
         client_id: before.client_id,
         vendor_id: item.id,
         before_json: before,
-        after_json: req.body,
+        after_json: body,
         requested_by: req.user?.id || null,
         status: 'PENDING'
       });
@@ -568,6 +586,54 @@ exports.updateVendor = async (req, res) => {
   }
 };
 exports.deleteVendor = deleteItem(Vendor);
+
+/** PUT /masters/vendors/:id/verification { decision: 'APPROVE' | 'REJECT', remarks } — Compliance Team only. */
+exports.verifyVendor = async (req, res) => {
+  try {
+    if (!isComplianceTeam(req.user?.role)) return error(res, 'Only the Compliance Team can verify vendor details.', 403);
+    const decision = String(req.body.decision || '').toUpperCase();
+    if (!['APPROVE', 'REJECT'].includes(decision)) return error(res, 'Use decision APPROVE or REJECT', 400);
+    const remarks = String(req.body.remarks || '').trim().slice(0, 500);
+    if (decision === 'REJECT' && !remarks) return error(res, 'Enter the reason for rejecting', 400);
+
+    const vendor = await Vendor.findOne({ where: { id: req.params.id, ...buildWhere(req) } });
+    if (!vendor) return error(res, 'Vendor not found', 404);
+    if (decision === 'APPROVE' && !vendor.gst_number && !vendor.pan_number) {
+      return error(res, 'The vendor has not submitted a GSTIN or PAN yet, so there is nothing to verify.', 400);
+    }
+    const pending = await VendorChangeRequest.count({ where: { vendor_id: vendor.id, status: 'PENDING' } });
+    if (decision === 'APPROVE' && pending) {
+      return error(res, 'This vendor has changes waiting in Vendor Change Approvals. Decide those first, then verify.', 409);
+    }
+
+    const before = vendor.verification_status;
+    await vendor.update({
+      verification_status: decision === 'APPROVE' ? 'VERIFIED' : 'REJECTED',
+      verified_by: req.user?.id || null,
+      verified_at: new Date(),
+      verification_remarks: remarks || null
+    });
+    await writeApprovalLog({
+      module: 'VENDOR', reference_id: vendor.id, user_id: req.user?.id || 1,
+      action: decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+      status: decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+      client_id: vendor.client_id, workflow_id: null,
+      comments: `Compliance verification${remarks ? `: ${remarks}` : ''}`
+    }).catch(() => {});
+    await VendorRiskHistory.create({
+      client_id: vendor.client_id,
+      vendor_id: vendor.id,
+      event_type: decision === 'APPROVE' ? 'APPROVAL_APPROVED' : 'APPROVAL_REJECTED',
+      summary: decision === 'APPROVE' ? 'Vendor details verified by Compliance' : 'Vendor details rejected by Compliance',
+      details_json: { from: before, to: vendor.verification_status, remarks: remarks || null },
+      created_by: req.user?.id || null
+    }).catch(() => {});
+    clearCache(`master_vendor_${vendor.client_id || 'global'}`);
+    return success(res, vendor, decision === 'APPROVE' ? 'Vendor verified' : 'Vendor verification rejected');
+  } catch (err) {
+    return error(res, err.message || 'Failed to verify vendor');
+  }
+};
 
 exports.getVendorAssets = async (req, res) => {
   try {
@@ -893,7 +959,8 @@ exports.decideVendorChangeRequest = async (req, res) => {
           // JSON parse failed — updateData stays as-is
         }
       }
-      await vendor.update(updateData);
+      updateData = withoutVerification(updateData);
+      await vendor.update(verifiedDetailsChanged(vendor.get({ plain: true }), updateData) ? { ...updateData, ...REVERIFY } : updateData);
       
       // Trigger GST validation after approval if gst_number was changed
       if (updateData.gst_number) {
