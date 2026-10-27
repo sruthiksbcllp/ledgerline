@@ -27,6 +27,19 @@ const { writeApprovalLog } = require('../utils/approvalTenancy');
 
 
 
+/**
+ * May this role act on the current approval level? Same test the approval engine applies when the
+ * approval is submitted (services/approvalEngine.js): the rule's role code or role name, or the
+ * platform owner (PROVIDER_ADMIN break-glass). Used to show the Approve / Reject buttons only to
+ * the person the server will accept.
+ */
+function roleMatchesRule(role, rule) {
+  const code = String(role || '').toUpperCase().trim();
+  if (code === 'PROVIDER_ADMIN') return true;
+  if (!rule) return false;
+  return code === String(rule.role_code || '').toUpperCase().trim() || code === String(rule.role || '').toUpperCase().trim();
+}
+
 exports.createPR = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   const fail = async (message, statusCode = 400) => {
@@ -457,7 +470,7 @@ exports.getPRs = async (req, res) => {
           can_approve = true;
         } else if (pr.Workflow && Array.isArray(pr.Workflow.matrix)) {
           const currentRule = pr.Workflow.matrix.find(m => m.level === pr.current_level);
-          if (currentRule && roleName === (currentRule.role || '').toLowerCase().trim()) {
+          if (roleMatchesRule(roleCode, currentRule)) {
             can_approve = true;
           }
         }
@@ -843,14 +856,22 @@ exports.getPOs = async (req, res, next) => {
       order: [['createdAt', 'DESC']]
     });
 
-    // Add can_approve flag for PO approval workflow (same pattern as getPRs)
+    // can_approve: POs in an approval-matrix workflow go to the role named on their current level
+    // (e.g. Director / CFO); POs without one keep the admin approvers.
     const userRole = (req.user?.role || '').toUpperCase();
     const APPROVER_ROLES = ['PROVIDER_ADMIN', 'SUPER_ADMIN', 'CLIENT_ADMIN', 'ADMIN'];
-    const canApprove = APPROVER_ROLES.includes(userRole);
     const APPROVABLE_STATUSES = ['SUBMITTED', 'IN_APPROVAL', 'PENDING_APPROVAL'];
+    const workflowIds = [...new Set(pos.filter((po) => po.workflow_id && APPROVABLE_STATUSES.includes(po.status)).map((po) => po.workflow_id))];
+    const rules = workflowIds.length
+      ? await ApprovalMatrix.findAll({ where: { workflow_id: workflowIds, is_active: true }, attributes: ['workflow_id', 'level', 'role', 'role_code'], raw: true })
+      : [];
     const enriched = pos.map(po => {
       const plain = po.toJSON();
-      plain.can_approve = canApprove && APPROVABLE_STATUSES.includes(plain.status);
+      if (!APPROVABLE_STATUSES.includes(plain.status)) plain.can_approve = false;
+      else if (plain.workflow_id) {
+        const rule = rules.find((r) => r.workflow_id === plain.workflow_id && r.level === (plain.current_level || plain.current_approval_level));
+        plain.can_approve = roleMatchesRule(userRole, rule);
+      } else plain.can_approve = APPROVER_ROLES.includes(userRole);
       return plain;
     });
     if (userRole === 'VENDOR') {
