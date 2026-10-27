@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button, Card, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Segmented,
-  Space, Steps, Table, Tag, Typography, message
+  Space, Steps, Table, Tag, Typography, Upload, message
 } from 'antd';
-import { RefreshCcw, ClipboardCheck, Eye, Plus } from 'lucide-react';
+import { RefreshCcw, ClipboardCheck, Eye, Plus, Paperclip } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
+import InvoiceDocument, { checkInvoiceFile } from '../components/procurement/InvoiceDocument';
 
 const { Text } = Typography;
 
@@ -100,9 +101,11 @@ const ServiceEntrySheets = () => {
   }, [sheets, filter]);
 
   // ── Step 1: record the service performed ──
+  const [invoiceFile, setInvoiceFile] = useState(null); // vendor's bill picked at Record service
   const openRecord = (po) => {
     setRecordPO(po);
     setQty({});
+    setInvoiceFile(null);
     form.resetFields();
   };
   const recordTotal = (recordPO?.items || []).reduce((s, i) => s + Number(qty[i.id] || 0) * Number(i.unit_price || 0), 0);
@@ -122,9 +125,21 @@ const ServiceEntrySheets = () => {
         service_description: values.service_description,
         performed_by: values.performed_by,
         invoice_number: values.invoice_number,
+        invoice_date: values.invoice_date ? values.invoice_date.format('YYYY-MM-DD') : undefined,
         items
       });
       message.success(res?.data?.message || 'Service entry recorded');
+      // The bill goes on the SES; it travels to the invoice created from it and stays there up to payment.
+      const sesId = res?.data?.data?.id;
+      if (invoiceFile && sesId) {
+        try {
+          const fd = new FormData();
+          fd.append('file', invoiceFile);
+          await api.post(`/procurement/ses/${sesId}/invoice-document`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        } catch (err) {
+          message.warning(`Service recorded, but the invoice file was not attached: ${err?.response?.data?.message || 'upload failed'}. Attach it from View.`, 6);
+        }
+      }
       setRecordPO(null);
       load();
     } catch (err) {
@@ -201,8 +216,11 @@ const ServiceEntrySheets = () => {
       title: 'Invoice', key: 'invoice',
       render: (_, r) => {
         const inv = (r.Invoices || [])[0];
-        if (inv) return <Button type="link" size="small" style={{ paddingInline: 0 }} onClick={() => navigate('/procurement/invoices')}>{inv.invoice_number}</Button>;
-        return <Text type="secondary">{r.status === 'APPROVED' ? 'Not invoiced' : '-'}</Text>;
+        const doc = inv?.document_url || r.invoice_document_url;
+        const number = inv
+          ? <Button type="link" size="small" style={{ paddingInline: 0 }} onClick={() => navigate('/procurement/invoices')}>{inv.invoice_number}</Button>
+          : <Text type="secondary">{r.invoice_number || (r.status === 'APPROVED' ? 'Not invoiced' : '-')}</Text>;
+        return <Space size={2} direction="vertical">{number}{doc && <InvoiceDocument url={doc} />}</Space>;
       }
     },
     lastActionColumn('SES', lastActions, { numberOf: (r) => r.ses_number }),
@@ -337,6 +355,22 @@ const ServiceEntrySheets = () => {
                 <Input placeholder="Invoice raised for this service" />
               </Form.Item>
             </Space>
+            <Space style={{ width: '100%' }} size={16} align="start">
+              <Form.Item name="invoice_date" label="Invoice date (optional)" style={{ flex: 1, minWidth: 260 }}>
+                <DatePicker style={{ width: '100%' }} format="DD MMM YYYY" />
+              </Form.Item>
+              <Form.Item label="Vendor invoice (optional)" style={{ flex: 1, minWidth: 260 }} tooltip="PDF, JPG or PNG up to 10 MB. It stays with this SES through confirmation, review and approval, and moves onto the invoice until it is paid." extra="Attach the bill now or later from View">
+                <Upload
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  maxCount={1}
+                  beforeUpload={(file) => { if (checkInvoiceFile(file)) setInvoiceFile(file); return false; }}
+                  onRemove={() => setInvoiceFile(null)}
+                  fileList={invoiceFile ? [{ uid: 'inv', name: invoiceFile.name, status: 'done' }] : []}
+                >
+                  <Button icon={<Paperclip size={14} />}>{invoiceFile ? 'Replace file' : 'Upload invoice'}</Button>
+                </Upload>
+              </Form.Item>
+            </Space>
             <Table
               rowKey="id"
               dataSource={recordPO.items || []}
@@ -375,6 +409,10 @@ const ServiceEntrySheets = () => {
               <Descriptions.Item label="Service">{action.ses.service_description}</Descriptions.Item>
               <Descriptions.Item label="Period">{fmtDate(action.ses.service_period_from)} – {fmtDate(action.ses.service_period_to)}</Descriptions.Item>
               <Descriptions.Item label="Value">{inr(action.ses.total_value)}</Descriptions.Item>
+              <Descriptions.Item label="Vendor invoice">
+                {action.ses.invoice_number ? <Text style={{ marginRight: 8 }}>{action.ses.invoice_number}</Text> : null}
+                <InvoiceDocument url={action.ses.invoice_document_url} />
+              </Descriptions.Item>
             </Descriptions>
             <Input.TextArea
               rows={3}
@@ -410,7 +448,14 @@ const ServiceEntrySheets = () => {
               <Descriptions.Item label="Service period">{fmtDate(view.service_period_from)} – {fmtDate(view.service_period_to)}</Descriptions.Item>
               <Descriptions.Item label="Stage"><Tag color={STATUS_META[view.status]?.color}>{STATUS_META[view.status]?.label || view.status}</Tag></Descriptions.Item>
               <Descriptions.Item label="Value">{inr(view.total_value)}</Descriptions.Item>
-              <Descriptions.Item label="Invoice">{(view.Invoices || [])[0]?.invoice_number || view.invoice_number || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Invoice">{(view.Invoices || [])[0]?.invoice_number || view.invoice_number || '-'}{view.invoice_date ? ` · ${fmtDate(view.invoice_date)}` : ''}</Descriptions.Item>
+              <Descriptions.Item label="Vendor invoice file" span={2}>
+                <InvoiceDocument
+                  url={(view.Invoices || [])[0]?.document_url || view.invoice_document_url}
+                  uploadPath={view.status !== 'REJECTED' && (view.Invoices || [])[0]?.status !== 'PAID' ? `/procurement/ses/${view.id}/invoice-document` : null}
+                  onUploaded={() => { openView(view); load(); }}
+                />
+              </Descriptions.Item>
               <Descriptions.Item label="Service performed" span={2}>{view.service_description}</Descriptions.Item>
             </Descriptions>
             <Table

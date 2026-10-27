@@ -119,7 +119,7 @@ const detailIncludes = [
   },
   { model: Vendor, attributes: ['id', 'vendor_name'] },
   { model: ServiceEntrySheetItem, as: 'items' },
-  { model: Invoice, attributes: ['id', 'invoice_number', 'status', 'matching_status', 'total_amount'], required: false },
+  { model: Invoice, attributes: ['id', 'invoice_number', 'status', 'matching_status', 'total_amount', 'document_url'], required: false },
   { model: User, as: 'Creator', attributes: userAttrs },
   { model: User, as: 'Confirmer', attributes: userAttrs },
   { model: User, as: 'Reviewer', attributes: userAttrs },
@@ -222,7 +222,7 @@ exports.getServiceEntrySheet = async (req, res, next) => {
 exports.createServiceEntrySheet = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
-    const { po_id, items, service_period_from, service_period_to, service_description, performed_by, invoice_number } = req.body || {};
+    const { po_id, items, service_period_from, service_period_to, service_description, performed_by, invoice_number, invoice_date } = req.body || {};
     if (!po_id) throw new AppError('Select the purchase order the service was performed against', 400);
     if (!service_period_from || !service_period_to) throw new AppError('Service period (from and to) is required', 400);
     if (new Date(service_period_to) < new Date(service_period_from)) throw new AppError('Service period "to" date is before the "from" date', 400);
@@ -265,6 +265,7 @@ exports.createServiceEntrySheet = async (req, res, next) => {
       service_description: String(service_description).trim(),
       performed_by: performed_by ? String(performed_by).trim() : null,
       invoice_number: invoice_number ? String(invoice_number).trim() : null,
+      invoice_date: invoice_date || null,
       total_value: total,
       status: 'PENDING_CONFIRMATION',
       created_by: req.user.id
@@ -399,7 +400,8 @@ async function invoiceFromSes({ req, ses, po, warnings }) {
       invoice_number: number,
       base_amount: money(ses.total_value),
       gst_amount: 0,
-      invoice_date: ses.approved_at || new Date()
+      invoice_date: ses.invoice_date || ses.approved_at || new Date(),
+      document_url: ses.invoice_document_url || null // the bill attached at Record service travels with it
     }, req);
     return invoice;
   } catch (err) {
@@ -423,3 +425,35 @@ exports.STAGES = STAGES;
 exports.blockReason = blockReason;
 
 exports.canSeeSes = canSeeSes; // used by the activity trail (workflow events)
+
+/**
+ * POST /api/procurement/ses/:id/invoice-document (multipart "file")
+ * Attach the vendor's invoice to an SES - at Record service or later. It stays on the SES for the
+ * confirmation, review and approval steps and is copied onto the invoice created from the SES (and
+ * onto one already linked to it that has no document yet), so it carries through to payment.
+ */
+const INVOICE_DOC_ROLES = ['REQUESTER', 'PROCUREMENT', 'ACCOUNTS_PAYABLE', 'FINANCE'];
+exports.uploadInvoiceDocument = async (req, res, next) => {
+  try {
+    if (!req.file) throw new AppError('Choose the invoice file (PDF, JPG or PNG)', 400);
+    const ses = await loadForUser(req, req.params.id);
+    const role = normalize(req.user.role);
+    const mayAttach = isAdminRole(role) || Number(ses.created_by) === Number(req.user.id) || INVOICE_DOC_ROLES.includes(role);
+    if (!mayAttach) throw new AppError('Your role cannot attach invoices to a service entry sheet', 403);
+    if (ses.status === 'REJECTED') throw new AppError('This SES was rejected; attach the invoice to a new entry', 409);
+    const linked = await Invoice.findAll({ where: { ses_id: ses.id, client_id: ses.client_id } });
+    if (linked.some((i) => i.status === 'PAID')) throw new AppError('The invoice for this SES is already paid; its document can no longer be replaced here', 409);
+
+    await require('../utils/fileStore').persistUpload(req.file); // keep a copy in the bucket / database store
+    const document_url = `/uploads/invoices/${req.file.filename}`;
+    const previous = ses.invoice_document_url;
+    await ses.update({ invoice_document_url: document_url, ...(req.body?.invoice_date ? { invoice_date: req.body.invoice_date } : {}) });
+    for (const inv of linked) {
+      if (!inv.document_url || inv.document_url === previous) await inv.update({ document_url });
+    }
+    audit(req, ses, 'SES_INVOICE_ATTACHED', { document_url });
+    return sendResponse(res, 200, { id: ses.id, invoice_document_url: document_url }, 'Invoice attached');
+  } catch (err) {
+    return next(err);
+  }
+};

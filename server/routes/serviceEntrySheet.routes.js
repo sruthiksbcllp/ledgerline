@@ -22,4 +22,23 @@ router.post('/:id/review', requireRead('SES'), ses.reviewServiceEntrySheet);
 router.post('/:id/approve', requireRead('SES'), blockWhenFinancialYearClosed, ses.approveServiceEntrySheet);
 router.post('/:id/reject', requireRead('SES'), ses.rejectServiceEntrySheet);
 
+// Vendor invoice file for an SES (PDF/JPG/PNG, 10 MB) - stored with the other invoice documents.
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const invoiceDir = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads'), 'invoices');
+if (!fs.existsSync(invoiceDir)) fs.mkdirSync(invoiceDir, { recursive: true });
+const invoiceUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, invoiceDir),
+    filename: (_req, file, cb) => cb(null, `ses-inv-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname || '').toLowerCase()}`)
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => (['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'].includes(file.mimetype) ? cb(null, true) : cb(new Error('Only PDF/JPG/PNG files are allowed')))
+});
+router.post('/:id/invoice-document', requireRead('SES'), blockWhenFinancialYearClosed, (req, res, next) => invoiceUpload.single('file')(req, res, (err) => {
+  if (!err) return next();
+  return res.status(400).json({ success: false, message: err.code === 'LIMIT_FILE_SIZE' ? 'File size must be 10MB or less' : (err.message || 'Invalid file upload') });
+}), ses.uploadInvoiceDocument);
+
 module.exports = router;

@@ -1498,7 +1498,7 @@ async function recordInvoice(body, req) {
       tds_section_code: vendor.tds_section_code || null,
       hsn_sac_code: hsn_sac_code || null,
       itc_eligible: Boolean(is_itc_eligible),
-      document_url: body.document_url || null,
+      document_url: body.document_url || (ses_id ? (await sequelize.models.ServiceEntrySheet.findByPk(ses_id, { attributes: ['invoice_document_url'] }))?.invoice_document_url : null) || null,
       invoice_date: body.invoice_date || new Date(),
       status: match.matched ? 'UNPAID' : 'EXCEPTION',
       matching_status: match.matched ? 'MATCHED' : 'MISMATCHED',

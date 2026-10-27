@@ -10,6 +10,7 @@ import { inr } from '../utils/apLedger';
 import { ChecksPanel, DocumentDropzone, StatusTag } from '../components/finance/DocumentReview';
 import { checkUploadFile, markProps } from '../utils/documentReview';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
+import InvoiceDocument from '../components/procurement/InvoiceDocument';
 
 const { Text } = Typography;
 
@@ -500,6 +501,13 @@ const ApInvoiceAutomation = () => {
               <Descriptions.Item label="GST">{inr(detail.gst_amount)}</Descriptions.Item>
               <Descriptions.Item label="Total"><Text strong>{inr(detail.total_amount)}</Text></Descriptions.Item>
               <Descriptions.Item label="Balance due"><Text strong>{inr(detail.balance)}</Text></Descriptions.Item>
+              <Descriptions.Item label="Vendor invoice" span={2}>
+                <InvoiceDocument
+                  url={detail.document_url}
+                  uploadPath={detail.status !== 'PAID' ? `/procurement/invoices/${detail.id}/upload` : null}
+                  onUploaded={() => { openDetail(detail.id); load(); }}
+                />
+              </Descriptions.Item>
             </Descriptions>
             {detail.lines?.length > 0 && (
               <Table size="small" rowKey="id" pagination={false} dataSource={detail.lines} columns={[

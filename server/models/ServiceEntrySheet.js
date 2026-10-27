@@ -36,6 +36,8 @@ module.exports = (sequelize) => {
     service_description: { type: DataTypes.TEXT, allowNull: false },
     performed_by: { type: DataTypes.STRING(150), allowNull: true }, // vendor's person / team who did the work
     invoice_number: { type: DataTypes.STRING(100), allowNull: true }, // vendor invoice, invoiced on approval
+    invoice_date: { type: DataTypes.DATEONLY, allowNull: true },
+    invoice_document_url: { type: DataTypes.STRING(500), allowNull: true }, // vendor's bill, copied to the invoice
     total_value: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 },
     status: {
       type: DataTypes.ENUM('PENDING_CONFIRMATION', 'PENDING_REVIEW', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'),
