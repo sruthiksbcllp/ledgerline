@@ -5,6 +5,7 @@ import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
+import { TDS_SECTIONS, defaultTdsRate } from '../config/tds';
 
 const { Title, Text } = Typography;
 
@@ -85,6 +86,7 @@ const InvoiceProcessing = () => {
   const submit = async (values) => {
     try {
       const payload = { ...values, total_amount: Number(values.base_amount || 0) + Number(values.gst_amount || 0) };
+      if (!editingInvoice) payload.tds_section_code = values.tds_section_code || 'NONE'; // '' = No TDS for this invoice
       if (editingInvoice) {
         await api.put(`/procurement/invoices/${editingInvoice.id}`, payload);
         message.success('Invoice updated');
@@ -349,7 +351,20 @@ const InvoiceProcessing = () => {
       >
         <Form form={form} layout="vertical" onFinish={submit}>
           <Form.Item name="po_id" label="PO" rules={[{ required: true, message: 'Please select a PO' }]}>
-            <Select placeholder="Select PO" onChange={(v) => { loadGrns(v); form.setFieldsValue({ grn_id: undefined, ses_id: undefined }); }} options={pos.map((p) => ({ value: p.id, label: p.po_number || `PO-${p.id}` }))} />
+            <Select
+              placeholder="Select PO"
+              onChange={(v) => {
+                loadGrns(v);
+                // TDS defaults from the PO's vendor master; it can be changed for this invoice.
+                const vendor = pos.find((p) => p.id === v)?.Vendor;
+                form.setFieldsValue({
+                  grn_id: undefined, ses_id: undefined,
+                  tds_section_code: vendor?.tds_section_code || '',
+                  tds_rate_percent: vendor?.tds_section_code ? Number(vendor.tds_rate_percent ?? defaultTdsRate(vendor.tds_section_code) ?? 0) : 0
+                });
+              }}
+              options={pos.map((p) => ({ value: p.id, label: p.po_number || `PO-${p.id}` }))}
+            />
           </Form.Item>
           <Form.Item name="grn_id" label="GRN (required for 3-way match)">
             <Select allowClear placeholder="Select the GRN for this PO" onChange={(v) => { if (v) form.setFieldsValue({ ses_id: null }); }} options={grns.map((g) => ({ value: g.id, label: g.grn_number || `GRN-${g.id}` }))} notFoundContent="No GRN yet - receive goods first" />
@@ -378,6 +393,24 @@ const InvoiceProcessing = () => {
               <InputNumber style={{ width: '100%' }} min={0} placeholder="0.00" prefix="₹" />
             </Form.Item>
           </Space>
+          {!editingInvoice && (
+            <Space style={{ width: '100%' }} align="start">
+              <Form.Item name="tds_section_code" label="TDS Section" style={{ flex: 1, minWidth: 220 }} initialValue="">
+                <Select
+                  options={[{ value: '', label: 'No TDS' }, ...TDS_SECTIONS]}
+                  onChange={(v) => form.setFieldsValue({ tds_rate_percent: v ? defaultTdsRate(v) : 0 })}
+                />
+              </Form.Item>
+              <Form.Item noStyle shouldUpdate={(a, b) => a.tds_section_code !== b.tds_section_code}>
+                {() => (
+                  <Form.Item name="tds_rate_percent" label="TDS Rate (%)" style={{ flex: 1 }} initialValue={0}
+                    extra="On the base amount. Nil until the vendor's purchases under this section pass the yearly threshold.">
+                    <InputNumber style={{ width: '100%' }} min={0} max={30} step={0.1} disabled={!form.getFieldValue('tds_section_code')} />
+                  </Form.Item>
+                )}
+              </Form.Item>
+            </Space>
+          )}
         </Form>
       </Modal>
 

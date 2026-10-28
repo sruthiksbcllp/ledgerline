@@ -500,6 +500,12 @@ const ApInvoiceAutomation = () => {
               <Descriptions.Item label="Subtotal">{inr(detail.base_amount)}</Descriptions.Item>
               <Descriptions.Item label="GST">{inr(detail.gst_amount)}</Descriptions.Item>
               <Descriptions.Item label="Total"><Text strong>{inr(detail.total_amount)}</Text></Descriptions.Item>
+              {Number(detail.tds_deducted) > 0 && (
+                <>
+                  <Descriptions.Item label={`TDS u/s ${detail.tds_section_code} @ ${Number(detail.tds_rate_percent || 0)}%`}>− {inr(detail.tds_deducted)}</Descriptions.Item>
+                  <Descriptions.Item label="Net payable to vendor">{inr(detail.net_payable)}</Descriptions.Item>
+                </>
+              )}
               <Descriptions.Item label="Balance due"><Text strong>{inr(detail.balance)}</Text></Descriptions.Item>
               <Descriptions.Item label="Vendor invoice" span={2}>
                 <InvoiceDocument

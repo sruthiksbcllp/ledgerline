@@ -35,4 +35,16 @@ const checkPermission = (module, action) => {
   };
 };
 
+/**
+ * Passes when the user has `action` on any one of `modules`, e.g. anyOf(['RFQ', 'PR'], 'CREATE').
+ * A refusal falls through to the next module; the last module's refusal is returned.
+ */
+checkPermission.anyOf = (modules, action) => {
+  const checks = modules.map((m) => checkPermission(m, action));
+  return (req, res, next) => {
+    const tryAt = (i) => checks[i](req, res, (err) => (err && i + 1 < checks.length ? tryAt(i + 1) : next(err)));
+    tryAt(0);
+  };
+};
+
 module.exports = checkPermission;

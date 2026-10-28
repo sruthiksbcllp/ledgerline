@@ -78,6 +78,9 @@ const PurchaseRequisition = () => {
   useEffect(() => { load(); }, []);
 
   const procType = Form.useWatch('procurement_type', form) || 'DIRECT';
+  // Only roles that run RFQs (Procurement, admins) pick the RFQ vendors here; a Requester's
+  // RFQ-type PR is sent out by Procurement once approved.
+  const canRunRfq = hasPerm(getStoredUser(), 'RFQ', 'ADD');
   const onboardedVendors = vendors.filter((vendor) => String(vendor.status || '').toUpperCase() === 'ACTIVE');
 
   const recordId = (res) => res?.data?.data?.id ?? res?.data?.id ?? null;
@@ -206,17 +209,19 @@ const PurchaseRequisition = () => {
       const res = await api.post('/procurement/pr', payload);
       const prId = res?.data?.data?.id || res?.data?.id;
       let rfqId = null;
-      if (prId && rfqVendors.length >= 1) {
+      if (prId && canRunRfq && rfqVendors.length >= 1) {
         try {
           const rfqRes = await api.post('/rfqs', { pr_id: prId, vendor_ids: rfqVendors, due_date: payload.required_date || null });
           rfqId = rfqRes?.data?.data?.id || rfqRes?.data?.id;
           if (rfqId) await api.post('/rfqs/' + rfqId + '/send');
         } catch (rfqErr) { /* RFQ not enabled for tenant, or send failed; PR still created */ }
       }
-      message.success(rfqId ? 'PR created and RFQ sent to the selected vendors' : 'PR created successfully');
+      message.success(rfqId ? 'PR created and RFQ sent to the selected vendors'
+        : (!canRunRfq && procurementType === 'RFQ' ? 'PR created. Procurement will request quotations once it is approved' : 'PR created successfully'));
       setOpen(false);
       form.resetFields();
-      if (rfqId) navigate('/procurement/rfq/' + rfqId);
+      if (!canRunRfq) load();
+      else if (rfqId) navigate('/procurement/rfq/' + rfqId);
       else navigate(prId ? '/procurement/rfq/create?pr_id=' + prId : '/procurement/rfq');
     } catch (e) {
       message.error(e?.response?.data?.message || 'PR creation failed');
@@ -423,7 +428,7 @@ const PurchaseRequisition = () => {
                 {onboardedVendors.map((v) => <Option key={v.id} value={v.id}>{v.vendor_name}</Option>)}
               </Select>
             </Form.Item>
-            <Form.Item name="rfq_vendor_ids" hidden={procType !== 'RFQ'} label="Request Quotes From (RFQ - up to 5 vendors)">
+            <Form.Item name="rfq_vendor_ids" hidden={procType !== 'RFQ' || !canRunRfq} label="Request Quotes From (RFQ - up to 5 vendors)">
               <Select mode="multiple" maxCount={5} placeholder="Select vendors" allowClear showSearch optionFilterProp="children">
                 {onboardedVendors.map((v) => <Option key={v.id} value={v.id}>{v.vendor_name}</Option>)}
               </Select>

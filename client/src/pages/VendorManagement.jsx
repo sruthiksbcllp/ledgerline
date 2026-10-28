@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, Form, Input, Modal, Space, Table, Tag, message, Empty, Row, Col, Popconfirm, Typography, Statistic, Tooltip, Badge, Select, Upload, Alert, Descriptions } from 'antd';
+import { Button, Card, Form, Input, InputNumber, Modal, Space, Table, Tag, message, Empty, Row, Col, Popconfirm, Typography, Statistic, Tooltip, Badge, Select, Upload, Alert, Descriptions } from 'antd';
+import { TDS_SECTIONS, defaultTdsRate } from '../config/tds';
 import { Plus, RefreshCcw, Trash2, Building2, Edit2, ShieldCheck, Tags, Sparkles, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
@@ -208,7 +209,7 @@ const VendorManagement = () => {
 
   const openEdit = async (record) => {
     setEditingVendor(record);
-    form.setFieldsValue(record);
+    form.setFieldsValue({ ...record, tds_section_code: record.tds_section_code || '', tds_rate_percent: record.tds_rate_percent != null ? Number(record.tds_rate_percent) : 0 });
     try {
       const res = await api.get('/masters/vendors/' + record.id + '/assets');
       const data = normalizeResponse(res?.data);
@@ -220,7 +221,9 @@ const VendorManagement = () => {
   };
 
   const submit = async (values) => {
-    const { asset_ids, ...vendorData } = values;
+    const { asset_ids, ...rest } = values;
+    // "No TDS" is stored as no section and a zero rate.
+    const vendorData = { ...rest, tds_section_code: rest.tds_section_code || null, tds_rate_percent: rest.tds_section_code ? (rest.tds_rate_percent ?? null) : 0 };
     try {
       let vendorId;
       if (editingVendor) {
@@ -533,6 +536,26 @@ const VendorManagement = () => {
             <Col span={12}>
               <Form.Item name="pan_number" label="PAN" rules={[{ len: 10, message: 'PAN must be exactly 10 characters' }]} extra={aiExtra('pan_number')}>
                 <Input status={aiInputStatus('pan_number')} placeholder="10 character PAN" maxLength={10} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="tds_section_code" label="TDS Section" initialValue="" extra="Deducted on the invoice value excluding GST; the vendor is paid the net amount.">
+                <Select
+                  options={[{ value: '', label: 'No TDS' }, ...TDS_SECTIONS]}
+                  onChange={(v) => form.setFieldsValue({ tds_rate_percent: v ? defaultTdsRate(v) : 0 })}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item noStyle shouldUpdate={(a, b) => a.tds_section_code !== b.tds_section_code}>
+                {() => (
+                  <Form.Item name="tds_rate_percent" label="TDS Rate (%)">
+                    <InputNumber style={{ width: '100%' }} min={0} max={30} step={0.1} disabled={!form.getFieldValue('tds_section_code')} />
+                  </Form.Item>
+                )}
               </Form.Item>
             </Col>
           </Row>

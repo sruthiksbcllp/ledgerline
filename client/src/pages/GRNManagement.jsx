@@ -21,9 +21,12 @@ const GRNManagement = () => {
   const [selectedPO, setSelectedPO] = useState(null);
   const [viewGrn, setViewGrn] = useState(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [viewJournals, setViewJournals] = useState([]); // AP journal entries posted for the GRN
 
   const openView = async (grn) => {
-    setViewGrn({ ...grn }); setViewLoading(true);
+    setViewGrn({ ...grn }); setViewLoading(true); setViewJournals([]);
+    // Roles without AP journal access (e.g. Warehouse) just do not see this section.
+    api.get(`/ap-journals/source/GRN/${grn.id}`).then((r) => setViewJournals(normalizeResponse(r?.data))).catch(() => setViewJournals([]));
     try {
       const res = await api.get(`/grn/${grn.id}`);
       const full = res?.data?.data || res?.data || grn;
@@ -181,6 +184,26 @@ const GRNManagement = () => {
               pagination={false}
               locale={{ emptyText: 'No line items' }}
             />
+            {viewJournals.map((je) => (
+              <div key={je.id} style={{ marginTop: 20 }}>
+                <Space size={8} style={{ marginBottom: 8 }}>
+                  <Text strong>Journal entry {je.je_number}</Text>
+                  <Text type="secondary">{je.entry_date ? new Date(je.entry_date).toLocaleDateString('en-IN') : ''}</Text>
+                  <Tag color={je.status === 'REVERSED' ? 'default' : 'success'}>{je.status}</Tag>
+                </Space>
+                <Table
+                  rowKey="id"
+                  dataSource={je.lines || []}
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: 'Account', key: 'account', render: (_, l) => <Text style={{ paddingLeft: Number(l.credit) > 0 ? 24 : 0 }}>{Number(l.credit) > 0 ? 'Cr' : 'Dr'} {l.account_code} · {l.account_name}</Text> },
+                    { title: 'Debit', dataIndex: 'debit', key: 'debit', align: 'right', render: (v) => (Number(v) > 0 ? `₹${Number(v).toLocaleString('en-IN')}` : '') },
+                    { title: 'Credit', dataIndex: 'credit', key: 'credit', align: 'right', render: (v) => (Number(v) > 0 ? `₹${Number(v).toLocaleString('en-IN')}` : '') }
+                  ]}
+                />
+              </div>
+            ))}
             <div style={{ marginTop: 20 }}>
               <ActivityTrail module="GRN" id={viewGrn.id} refreshKey={grns} />
             </div>

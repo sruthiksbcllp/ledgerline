@@ -1469,8 +1469,18 @@ async function recordInvoice(body, req) {
     const gstSplit = determineGstSplit({ vendorStateCode, supplyStateCode, gstAmount: gstAmountInput });
     const sameState = gstSplit.type === 'INTRA';
 
-    const tdsRate = Number(vendor.tds_rate_percent || process.env.DEFAULT_TDS_RATE_PERCENT || 2);
-    const tds_amount = baseAmount * (tdsRate / 100);
+    // TDS only where a section applies: the vendor master's section, or the one chosen on the invoice
+    // ('' / 'NONE' on the invoice means no TDS). Deducted on the value excluding GST.
+    // A vendor submitting its own invoice cannot change the TDS set on its vendor master.
+    const isVendorUser = String(req.user?.role || req.user?.role_code || '').toUpperCase() === 'VENDOR';
+    const sectionInput = !isVendorUser && Object.prototype.hasOwnProperty.call(body, 'tds_section_code') ? String(body.tds_section_code || '').trim() : null;
+    const tdsSection = sectionInput === null ? (vendor.tds_section_code || null) : (sectionInput && sectionInput !== 'NONE' ? sectionInput : null);
+    const rateInput = !isVendorUser && body.tds_rate_percent !== undefined && body.tds_rate_percent !== null && body.tds_rate_percent !== '' ? Number(body.tds_rate_percent) : null;
+    const tdsCalc = await require('../services/TDSService').calculate({
+      clientId, vendor, sectionCode: tdsSection, ratePercent: rateInput, baseAmount, invoiceDate: body.invoice_date || new Date()
+    });
+    const tdsRate = tdsCalc.rate;
+    const tds_amount = tdsCalc.amount;
 
     if (String(process.env.ENFORCE_HSN_SAC || 'false').toLowerCase() === 'true' && !hsn_sac_code) {
       throw new AppError('HSN/SAC code is required for invoice compliance', 400);
@@ -1495,9 +1505,9 @@ async function recordInvoice(body, req) {
       sgst_amount: gstSplit.sgst_amount,
       igst_amount: gstSplit.igst_amount,
       tds_rate_percent: tdsRate,
-      tds_section_code: vendor.tds_section_code || null,
+      tds_section_code: tdsSection,
       hsn_sac_code: hsn_sac_code || null,
-      itc_eligible: Boolean(is_itc_eligible),
+      itc_eligible: is_itc_eligible === undefined || is_itc_eligible === null ? true : Boolean(is_itc_eligible),
       document_url: body.document_url || (ses_id ? (await sequelize.models.ServiceEntrySheet.findByPk(ses_id, { attributes: ['invoice_document_url'] }))?.invoice_document_url : null) || null,
       invoice_date: body.invoice_date || new Date(),
       status: match.matched ? 'UNPAID' : 'EXCEPTION',

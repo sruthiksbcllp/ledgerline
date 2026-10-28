@@ -21,10 +21,11 @@ router.get('/:id/replies/:messageId', requireSeniorAdmin, ctrl.getReply);
 router.get('/:id/replies/:messageId/attachments/:attachmentId', requireSeniorAdmin, ctrl.getReplyAttachment);
 router.post('/:id/replies/:messageId/quotation-draft', requireSeniorAdmin, ctrl.quotationDraftFromReply);
 router.post('/', rbacMiddleware(['PROCUREMENT', 'FINANCE']), ctrl.createRfq);
-router.post('/:id/email-preview', checkPermission('PR', 'EDIT'), ctrl.rfqEmailPreview); // review before sending
-router.post('/:id/send', checkPermission('PR', 'EDIT'), ctrl.sendRfq);
-router.post('/:id/vendors', checkPermission('PR', 'EDIT'), ctrl.addVendors);
-router.post('/:id/vendors/:vendorId/response', checkPermission('PR', 'CREATE'), ctrl.recordResponse);
-router.post('/:id/close', checkPermission('PR', 'EDIT'), ctrl.closeRfq);
+// Procurement runs RFQs with its RFQ permission; roles with PR rights keep the access they had.
+router.post('/:id/email-preview', checkPermission.anyOf(['RFQ', 'PR'], 'EDIT'), ctrl.rfqEmailPreview); // review before sending
+router.post('/:id/send', checkPermission.anyOf(['RFQ', 'PR'], 'EDIT'), ctrl.sendRfq);
+router.post('/:id/vendors', checkPermission.anyOf(['RFQ', 'PR'], 'EDIT'), ctrl.addVendors);
+router.post('/:id/vendors/:vendorId/response', checkPermission.anyOf(['RFQ', 'PR'], 'CREATE'), ctrl.recordResponse);
+router.post('/:id/close', checkPermission.anyOf(['RFQ', 'PR'], 'EDIT'), ctrl.closeRfq);
 
 module.exports = router;

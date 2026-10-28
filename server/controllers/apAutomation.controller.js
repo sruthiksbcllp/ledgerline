@@ -13,6 +13,8 @@ const { buildAdminWhere, getClientId } = require('../utils/tenantFilter');
 const { extractInvoice, checkInvoiceNumbers, normalizeDate, toNumber } = require('../services/invoiceExtraction.service');
 const { ExtractionError } = require('../services/vendorExtraction.service');
 const { recordAudit, documentHistory } = require('../utils/financeAudit');
+// The vendor is paid the invoice total less TDS; the TDS goes to the government (AP JE reference 5.1).
+const { netPayableOf, tdsOf } = require('../services/apJournal.service');
 
 const STATUS_LABEL = {
   UNPAID: 'Pending', APPROVED_FOR_PAYMENT: 'Approved', PARTIAL: 'Partially Paid', PAID: 'Paid',
@@ -164,9 +166,10 @@ exports.create = async (req, res) => {
         base_amount: subtotal,
         gst_amount: data.tax_amount,
         total_amount: round2(subtotal + data.tax_amount),
-        tds_rate_percent: vendor.tds_rate_percent ?? 2,
+        // TDS only when the vendor has a TDS section (none set = no deduction).
+        tds_rate_percent: vendor.tds_section_code ? Number(vendor.tds_rate_percent || 0) : 0,
         tds_section_code: vendor.tds_section_code || null,
-        tds_amount: round2((subtotal * Number(vendor.tds_rate_percent ?? 2)) / 100),
+        tds_amount: vendor.tds_section_code ? round2((subtotal * Number(vendor.tds_rate_percent || 0)) / 100) : 0,
         hsn_sac_code: data.hsn_sac_code,
         status: 'UNPAID',
         matching_status: 'PENDING',
@@ -209,7 +212,7 @@ exports.list = async (req, res) => {
     success: true,
     data: rows.map((r) => {
       const j = r.toJSON();
-      const balance = round2(Number(j.total_amount || 0) - Number(j.paid_amount || 0));
+      const balance = round2(netPayableOf(j) - Number(j.paid_amount || 0));
       const overdue = j.due_date && balance > 0 && !['PAID', 'REJECTED'].includes(j.status) && new Date(j.due_date) < new Date(new Date().toDateString());
       return { ...j, balance, overdue, status_label: STATUS_LABEL[j.status] || j.status };
     })
@@ -231,7 +234,7 @@ exports.detail = async (req, res) => {
   if (!invoice) return fail(res, 404, 'Invoice not found');
   const history = await documentHistory(tenantWhere, 'INVOICE', invoice.id);
   const j = invoice.toJSON();
-  return res.json({ success: true, data: { ...j, balance: round2(Number(j.total_amount || 0) - Number(j.paid_amount || 0)), status_label: STATUS_LABEL[j.status] || j.status, history } });
+  return res.json({ success: true, data: { ...j, tds_deducted: tdsOf(j), net_payable: netPayableOf(j), balance: round2(netPayableOf(j) - Number(j.paid_amount || 0)), status_label: STATUS_LABEL[j.status] || j.status, history } });
 };
 
 const loadOwned = (req) => Invoice.findOne({ where: { ...buildAdminWhere(req), id: req.params.id } });
@@ -275,11 +278,11 @@ exports.recordPayment = async (req, res) => {
         return { status: 409, message: `Payments can only be recorded on approved invoices (this one is ${STATUS_LABEL[invoice.status] || invoice.status})` };
       }
       if (invoice.payment_blocked) return { status: 409, message: `Payment is blocked: ${invoice.payment_block_reason || 'open exception'}` };
-      const balance = round2(Number(invoice.total_amount) - Number(invoice.paid_amount || 0));
+      const balance = round2(netPayableOf(invoice) - Number(invoice.paid_amount || 0));
       if (amount > balance) return { status: 422, message: `Payment exceeds the balance due of ${balance}` };
       const before = invoice.toJSON();
       const paid = round2(Number(invoice.paid_amount || 0) + amount);
-      const fullyPaid = paid >= Number(invoice.total_amount);
+      const fullyPaid = paid >= netPayableOf(invoice);
       await ApPayment.create({
         client_id: invoice.client_id, invoice_id: invoice.id, amount, payment_date: paymentDate,
         payment_mode: req.body?.payment_mode || null, reference: req.body?.reference || null, notes: req.body?.notes || null, created_by: req.user.id

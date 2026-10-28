@@ -36,12 +36,25 @@ const GRNDrawer = ({ open, onClose, po, onRefresh }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [warnings, setWarnings] = useState([]);
+  const [entryAccounts, setEntryAccounts] = useState(null); // accounts this receipt posts to (AP journal)
   const [form] = Form.useForm();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (po && open) loadPOItems();
   }, [po, open]);
+
+  useEffect(() => {
+    if (!po || !open) return;
+    setEntryAccounts(null);
+    api.get(`/ap-journals/preview/receipt/${po.id}`)
+      .then((res) => setEntryAccounts(res.data?.data || null))
+      .catch(() => setEntryAccounts(null));
+  }, [po, open]);
+
+  // Value the GRN posts: accepted quantity x PO unit price (same as the AP journal engine).
+  const entryValue = Math.round(items.reduce((sum, item) => sum + Number(item.accepted_qty || 0) * Number(item.unit_price || 0), 0) * 100) / 100;
+  const inr = (v) => `₹${Number(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const loadPOItems = async () => {
     try {
@@ -144,6 +157,9 @@ const GRNDrawer = ({ open, onClose, po, onRefresh }) => {
         message: `GRN ${resData.grn?.grn_number || ""} created`,
         description: (
           <Space direction="vertical" size={6}>
+            {entryAccounts && entryValue > 0 && (
+              <Text>Journal entry posted to AP Journal: Dr {entryAccounts.debit.name} / Cr {entryAccounts.credit.name} {inr(entryValue)}.</Text>
+            )}
             {invoice
               ? <Text>Invoice <Text strong>{invoice.invoice_number}</Text> moved to Invoice Processing{invoice.matching_status === "MISMATCHED" ? " with a 3-way match exception" : ""}.</Text>
               : <Text>Enter the vendor invoice in Invoice Processing.</Text>}
@@ -354,6 +370,37 @@ const GRNDrawer = ({ open, onClose, po, onRefresh }) => {
           </div>
         )}
       />
+
+      {entryAccounts && (
+        <div style={{ marginTop: 24, padding: 16, border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+          <Space direction="vertical" size={2} style={{ marginBottom: 12 }}>
+            <Text strong style={{ fontSize: 15 }}>Journal entry on submit</Text>
+            <Text type="secondary">Goods received, not yet invoiced. The vendor invoice later clears GR/IR.</Text>
+          </Space>
+          <Table
+            size="small"
+            pagination={false}
+            rowKey="code"
+            dataSource={[
+              { side: "Dr", code: entryAccounts.debit.code, name: entryAccounts.debit.name, debit: entryValue, credit: 0 },
+              { side: "Cr", code: entryAccounts.credit.code, name: entryAccounts.credit.name, debit: 0, credit: entryValue }
+            ]}
+            columns={[
+              { title: "Account", key: "account", render: (_, r) => <Text style={{ paddingLeft: r.side === "Cr" ? 24 : 0 }}>{r.side} {r.code} · {r.name}</Text> },
+              { title: "Debit", dataIndex: "debit", key: "debit", align: "right", width: 160, render: (v) => (v > 0 ? inr(v) : "") },
+              { title: "Credit", dataIndex: "credit", key: "credit", align: "right", width: 160, render: (v) => (v > 0 ? inr(v) : "") }
+            ]}
+            summary={() => (
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0}><Text strong>Total</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={1} align="right"><Text strong>{inr(entryValue)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={2} align="right"><Text strong>{inr(entryValue)}</Text></Table.Summary.Cell>
+              </Table.Summary.Row>
+            )}
+          />
+          {!(entryValue > 0) && <Text type="secondary" style={{ display: "block", marginTop: 8 }}>Enter accepted quantities to see the amounts. Rejected quantity is not posted.</Text>}
+        </div>
+      )}
 
       <div style={{ marginTop: 24, padding: 16, border: '1px solid #e2e8f0', borderRadius: 8, backgroundColor: '#fdfcfe' }}>
         <Title level={2}><ShieldCheck size={18} style={{ marginRight: 8, verticalAlign: 'text-bottom' }} /> Enterprise Controls Active</Title>

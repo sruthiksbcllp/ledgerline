@@ -190,6 +190,7 @@ app.use('/api/oauth/mail', require('./routes/mailOAuth.routes')); // Google/Micr
 app.use('/api/vendor-categories', require('./routes/vendorCategory.routes')); // CR-P04
 app.use('/api/three-way-match', require('./routes/threeWayMatch.routes'));
 app.use('/api/grn', grnRoutes);
+app.use('/api/ap-journals', require('./routes/apJournal.routes')); // AP journal entries (GRN, SES, invoice, payment) and balances
 app.use('/api/workflow-events', require('./routes/workflowEvents.routes')); // AP activity trail (role | user, action, status, time)
 
 // Finance & Compliance

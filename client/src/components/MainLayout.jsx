@@ -145,6 +145,8 @@ const MainLayout = ({ children }) => {
   const canSeeFinance = ['PROVIDER_ADMIN','DEV_ADMIN','SUPER_ADMIN','CLIENT_ADMIN','ADMIN'].includes(normalizedRole);
   // AI invoice pages follow the API's role rules (see procurement.routes ap-invoices and ar.routes).
   const canSeeApAutomation = canSeeFinance || ['ACCOUNTS_PAYABLE','FINANCE','DIRECTOR_CFO','MANAGER','COMPLIANCE','MANAGEMENT','PROCUREMENT','AUDITOR'].includes(normalizedRole);
+  // AP journal follows the API's readers (routes/apJournal.routes.js).
+  const canSeeApJournal = canSeeFinance || ['ACCOUNTS_PAYABLE','FINANCE','DIRECTOR_CFO','MANAGEMENT'].includes(normalizedRole);
   const canSeeArInvoices = canSeeFinance || ['ACCOUNTS_RECEIVABLE','FINANCE','MANAGEMENT'].includes(normalizedRole);
   const canSeeMaintenance = ['PROVIDER_ADMIN','DEV_ADMIN','SUPER_ADMIN','CLIENT_ADMIN','ADMIN','MAINTENANCE'].includes(normalizedRole);
   const canSeeAudit = ['PROVIDER_ADMIN','DEV_ADMIN','SUPER_ADMIN','CLIENT_ADMIN','ADMIN','AUDITOR'].includes(normalizedRole);
@@ -354,7 +356,7 @@ const MainLayout = ({ children }) => {
         { key: '/finance/ap/ai-invoices', icon: <Sparkles size={16} />, label: 'AI Invoice Processing', hidden: !canSeeApAutomation },
         { key: '/procurement/invoices', icon: <ReceiptIndianRupee size={16} />, label: 'Invoice Processing', hidden: !canSeeProcurement || features?.ENABLE_INVOICE_MODULE === false },
         { key: '/finance/three-way-match', icon: <GitMerge size={16} />, label: '3-Way Match', hidden: !canSeeFinance },
-        { key: '/finance/ap-accounting-entry', icon: <BookOpen size={16} />, label: 'AP Accounting Entry', hidden: !canSeeFinance },
+        { key: '/finance/ap-accounting-entry', icon: <BookOpen size={16} />, label: 'AP Journal', hidden: !canSeeApJournal },
         { key: '/finance/ap-management', icon: <Scale size={16} />, label: 'Accounts Payable Management', hidden: !canSeeFinance },
         { key: '/finance/payment-processing', icon: <WalletCards size={16} />, label: 'Payment Processing', hidden: !canSeeFinance },
         { key: '/procurement/vendor-risk', icon: <ShieldCheck size={16} />, label: 'Vendor Risk', hidden: !canSeeProcurement },
@@ -675,7 +677,7 @@ const MainLayout = ({ children }) => {
               </span>
               <ChevronRight size={14} />
               <span style={{ color: navTextBold, fontWeight: 700, textTransform: location.pathname === '/' || location.pathname === '/dashboard' ? 'none' : 'capitalize', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {location.pathname === '/' || location.pathname === '/dashboard' ? 'AR & AP' : location.pathname.split('/').pop().replace(/-/g, ' ')}
+                {location.pathname === '/' || location.pathname === '/dashboard' ? 'AR & AP' : ({ 'ap-accounting-entry': 'AP Journal' }[location.pathname.split('/').pop()] || location.pathname.split('/').pop().replace(/-/g, ' '))}
               </span>
             </div>
           </div>

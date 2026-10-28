@@ -440,4 +440,4 @@ async function latestOf(models, { clientId, module, ids }) {
   return out;
 }
 
-module.exports = { install, record, trailOf, latestOf, TRACKED, MODULES, roleNameOf, userNameOf };
+module.exports = { install, record, trailOf, latestOf, TRACKED, MODULES, roleNameOf, userNameOf, resolveActor };

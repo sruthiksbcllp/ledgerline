@@ -72,10 +72,11 @@ router.delete('/pr/:id', checkPermission('PR', 'DELETE'), blockWhenFinancialYear
 router.get('/quotations', requireRead('RFQ'), asyncHandler(procurementController.getQuotations));
 router.get('/quotations/compare', requireRead('RFQ'), asyncHandler(procurementController.getQuotationComparison));
 router.get('/quotations/:id', requireRead('RFQ'), asyncHandler(procurementController.getQuotationById));
-router.post('/quotations', checkPermission('PR', 'CREATE'), blockWhenFinancialYearClosed, asyncHandler(procurementController.createQuotation));
-router.put('/quotations/:id/status', checkPermission('PR', 'EDIT'), blockWhenFinancialYearClosed, asyncHandler(procurementController.updateQuotationStatus));
-router.put('/quotations/:id/approve', checkPermission('PR', 'EDIT'), blockWhenFinancialYearClosed, asyncHandler(procurementController.approveQuotation));
-router.put('/quotations/:id/reject', checkPermission('PR', 'EDIT'), blockWhenFinancialYearClosed, asyncHandler(procurementController.rejectQuotation));
+router.post('/quotations', checkPermission.anyOf(['RFQ', 'PR'], 'CREATE'), blockWhenFinancialYearClosed, asyncHandler(procurementController.createQuotation));
+// Procurement awards with its RFQ permission (non-L1 needs a justification; the PO still goes to approval).
+router.put('/quotations/:id/status', checkPermission.anyOf(['RFQ', 'PR'], 'EDIT'), blockWhenFinancialYearClosed, asyncHandler(procurementController.updateQuotationStatus));
+router.put('/quotations/:id/approve', checkPermission.anyOf(['RFQ', 'PR'], 'EDIT'), blockWhenFinancialYearClosed, asyncHandler(procurementController.approveQuotation));
+router.put('/quotations/:id/reject', checkPermission.anyOf(['RFQ', 'PR'], 'EDIT'), blockWhenFinancialYearClosed, asyncHandler(procurementController.rejectQuotation));
 
 // PO Routes
 router.get('/po', requireRead('PO'), activityLog('PROCUREMENT', 'MODULE'), asyncHandler(procurementController.getPOs));

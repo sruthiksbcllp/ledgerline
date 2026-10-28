@@ -44,5 +44,7 @@ db.Sequelize = Sequelize;
 
 // Who-did-what trail on the AP documents (role, name, action, status, time).
 require('../services/workflowTrail.service').install(db);
+// Balanced journal for every AP event (GRN, SES, invoice, payment).
+require('../services/apJournal.service').install(db);
 
 module.exports = db;
