@@ -21,6 +21,8 @@ const EVENTS = {
   SERVICE_RECEIPT: { label: 'Service receipt', color: 'cyan' },
   INVOICE: { label: 'Vendor invoice', color: 'purple' },
   PAYMENT: { label: 'Payment', color: 'green' },
+  ADVANCE: { label: 'Advance to vendor', color: 'gold' },
+  PURCHASE_RETURN: { label: 'Purchase return', color: 'magenta' },
   REVERSAL: { label: 'Reversal', color: 'volcano' },
 };
 
@@ -31,6 +33,10 @@ const RULES = [
   { key: 'inv', event: 'Vendor invoice (matched)', debit: 'GR/IR 2015 (excess to PPV 5010) · Input CGST 1411 / SGST 1412 / IGST 1410', credit: 'Accounts payable 2010 (net of TDS) · TDS payable 2160', ref: '2.1 – 2.6' },
   { key: 'nogrn', event: 'Invoice with no receipt', debit: 'Expense / asset directly · Input GST', credit: 'Accounts payable 2010 · TDS payable 2160', ref: '2.5' },
   { key: 'itc', event: 'GST not creditable', debit: 'GST added to the cost account', credit: '—', ref: '3.4' },
+  { key: 'adv', event: 'Advance on a PO', debit: 'Advances to vendors 1300', credit: 'Operating bank 1010', ref: '4.1 – 4.2' },
+  { key: 'advinv', event: 'Invoice on a PO with an advance', debit: 'As for the invoice', credit: 'Advances to vendors 1300 (advance adjusted) · Accounts payable 2010 reduced by it', ref: '4.2' },
+  { key: 'retb', event: 'Return to vendor, before the invoice', debit: 'GR/IR clearing 2015', credit: 'Inventory 1200 / Consumables 6800 / Capital WIP 1500', ref: '1.5' },
+  { key: 'reta', event: 'Return to vendor, after the invoice', debit: 'Accounts payable 2010 (value + GST)', credit: 'Inventory / Expense · Input CGST 1411 / SGST 1412 / IGST 1410', ref: '4.3' },
   { key: 'pay', event: 'Payment', debit: 'Accounts payable 2010', credit: 'Operating bank 1010', ref: '5.1 – 5.2' },
   { key: 'rev', event: 'Invoice rejected after posting', debit: 'Each credit of the invoice journal', credit: 'Each debit of the invoice journal', ref: 'Reversal' },
 ];

@@ -35,6 +35,8 @@ module.exports = (sequelize) => {
     tds_amount: { type: DataTypes.DECIMAL(15, 2) },
     tds_rate_percent: { type: DataTypes.DECIMAL(5, 2), defaultValue: 2 },
     tds_section_code: { type: DataTypes.STRING(20) },
+    advance_adjusted: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 }, // PO advance set off against this invoice
+    returns_credit: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 }, // goods returned after the invoice (value + GST)
     hsn_sac_code: { type: DataTypes.STRING(20) },
     itc_eligible: { type: DataTypes.BOOLEAN, defaultValue: true },
     document_url: { type: DataTypes.STRING(500) },

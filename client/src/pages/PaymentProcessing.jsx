@@ -175,19 +175,20 @@ const PaymentProcessing = () => {
       </Card>
 
       <Row gutter={[16, 16]}>
-        <Col xs={24} lg={10}>
-          <Card style={contentCard} styles={{ body: { padding: 0 } }} title="Proposals">
+        <Col xs={24} xl={14}>
+          <Card style={{ ...contentCard, height: '100%' }} styles={{ body: { padding: 0 } }} title="Proposals">
             <Table
               rowKey="id"
+              scroll={{ x: 'max-content' }}
               loading={loading}
               pagination={false}
               dataSource={store.proposals}
               locale={{ emptyText: <Empty description="No payment is in progress" style={{ margin: '24px 0' }} /> }}
               onRow={(row) => ({ onClick: () => setActiveId(row.id), style: { cursor: 'pointer', background: row.id === proposal?.id ? 'rgba(79, 70, 229, 0.06)' : undefined } })}
               columns={[
-                { title: 'Proposal', dataIndex: 'id' },
+                { title: 'Proposal', dataIndex: 'id', render: (v) => <Text style={{ whiteSpace: 'nowrap' }}>{v}</Text> },
                 { title: 'Step', dataIndex: 'status', render: (v) => <Tag>{STEPS.find((step) => step.key === v)?.title || v}</Tag> },
-                { title: 'Invoices', key: 'count', render: (_, row) => row.invoiceIds.length },
+                { title: 'Invoices', key: 'count', align: 'right', render: (_, row) => row.invoiceIds.length },
                 {
                   title: 'Last step by (Role | User)',
                   key: 'by',
@@ -206,26 +207,28 @@ const PaymentProcessing = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} lg={14}>
-          <Card style={contentCard} styles={{ body: { padding: '16px 20px 0' } }}>
-            <Text strong style={{ color: '#1E3A5F', fontSize: 16 }}>Payment Entry</Text>
-            <div style={{ margin: '8px 0 12px' }}>
+        <Col xs={24} xl={10}>
+          <Card style={{ ...contentCard, height: '100%' }} styles={{ body: { padding: 0 } }} title="Payment Entry">
+            <div style={{ padding: '12px 16px' }}>
               <Text type="secondary">Invoice outstanding: {inr(outstanding || payableTotal)}.</Text>
             </div>
+            <Table
+              rowKey="key"
+              pagination={false}
+              dataSource={paymentJournal(payableTotal)}
+              columns={[
+                { title: 'Account', dataIndex: 'account', onHeaderCell: navyHead },
+                { title: 'Debit', dataIndex: 'debit', align: 'right', onHeaderCell: navyHead, render: (v) => (Number(v) ? plain(v) : '') },
+                { title: 'Credit', dataIndex: 'credit', align: 'right', onHeaderCell: navyHead, render: (v) => (Number(v) ? plain(v) : '') },
+              ]}
+            />
           </Card>
-          <Table
-            rowKey="key"
-            pagination={false}
-            dataSource={paymentJournal(payableTotal)}
-            columns={[
-              { title: 'Account', dataIndex: 'account', onHeaderCell: navyHead },
-              { title: 'Debit', dataIndex: 'debit', align: 'right', onHeaderCell: navyHead, render: (v) => (Number(v) ? plain(v) : '') },
-              { title: 'Credit', dataIndex: 'credit', align: 'right', onHeaderCell: navyHead, render: (v) => (Number(v) ? plain(v) : '') },
-            ]}
-          />
-          <Card style={{ ...contentCard, marginTop: 16 }} styles={{ body: { padding: 0 } }} title="Invoices in this payment">
+        </Col>
+        <Col xs={24}>
+          <Card style={contentCard} styles={{ body: { padding: 0 } }} title="Invoices in this payment">
             <Table
               rowKey="id"
+              scroll={{ x: 'max-content' }}
               pagination={false}
               dataSource={proposalInvoices}
               locale={{ emptyText: <Empty description="Choose a proposal to see its invoices" /> }}

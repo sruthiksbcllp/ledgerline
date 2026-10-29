@@ -191,6 +191,7 @@ app.use('/api/vendor-categories', require('./routes/vendorCategory.routes')); //
 app.use('/api/three-way-match', require('./routes/threeWayMatch.routes'));
 app.use('/api/grn', grnRoutes);
 app.use('/api/ap-journals', require('./routes/apJournal.routes')); // AP journal entries (GRN, SES, invoice, payment) and balances
+app.use('/api/purchase-returns', require('./routes/purchaseReturn.routes')); // returns to vendor against GRNs
 app.use('/api/workflow-events', require('./routes/workflowEvents.routes')); // AP activity trail (role | user, action, status, time)
 
 // Finance & Compliance

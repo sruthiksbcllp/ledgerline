@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message, Empty, Row, Col, Upload, Typography, Alert, Popconfirm, Tooltip, Drawer } from 'antd';
+import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message, Empty, Row, Col, Upload, Typography, Alert, Popconfirm, Tooltip, Drawer, Radio } from 'antd';
 import { Plus, RefreshCcw, Download, Upload as UploadIcon, Eye, FileText, Trash2, Edit2, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import { TDS_SECTIONS, defaultTdsRate } from '../config/tds';
+import { JournalEntries } from '../components/finance/JournalEntries';
+import { invoiceJournalHint } from '../utils/apLedger';
 
 const { Title, Text } = Typography;
 
@@ -34,6 +36,7 @@ const InvoiceProcessing = () => {
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
   const [sesList, setSesList] = useState([]); // approved service entry sheets of the selected PO
+  const [advanceInfo, setAdvanceInfo] = useState(null); // advance given on the selected PO and what is left to adjust
   const [open, setOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState(null);
   const [viewingInvoice, setViewingInvoice] = useState(null);
@@ -47,7 +50,12 @@ const InvoiceProcessing = () => {
   const [exReason, setExReason] = useState('');
   const [exSaving, setExSaving] = useState(false);
 
-  const openAdd = () => { setEditingInvoice(null); form.resetFields(); setGrns([]); setSesList([]); setOpen(true); };
+  const openAdd = () => { setEditingInvoice(null); form.resetFields(); setGrns([]); setSesList([]); setAdvanceInfo(null); setOpen(true); };
+  const loadAdvance = (poId) => {
+    setAdvanceInfo(null);
+    if (!poId) return;
+    api.get(`/ap-journals/preview/advance/${poId}`).then((r) => setAdvanceInfo(r.data?.data || null)).catch(() => setAdvanceInfo(null));
+  };
   const openEdit = (record) => { setEditingInvoice(record); form.setFieldsValue(record); loadGrns(record.po_id); setOpen(true); };
 
   // Receipt documents a PO invoice can be matched to: GRNs (goods) and approved SES (services).
@@ -193,6 +201,25 @@ const InvoiceProcessing = () => {
       key: 'total_amount',
       align: 'right',
       render: (v) => `₹${Number(v || 0).toLocaleString('en-IN')}`
+    },
+    {
+      // Advance given on the invoice's PO and how much of it was set off on this invoice.
+      title: 'Advance',
+      key: 'advance',
+      render: (_, r) => {
+        const onPo = r.PurchaseOrder?.advance_given ? Number(r.PurchaseOrder.advance_amount || 0) : 0;
+        const here = Number(r.advance_adjusted || 0);
+        const inr = (n) => `₹${n.toLocaleString('en-IN')}`;
+        if (!onPo && !here) return <Text type="secondary" style={{ fontSize: 12 }}>No advance</Text>;
+        return (
+          <div style={{ lineHeight: 1.3 }}>
+            {here > 0 && r.status === 'REJECTED' && <Tag style={{ marginInlineEnd: 0 }}>{inr(here)} released (rejected)</Tag>}
+            {here > 0 && r.status !== 'REJECTED' && <Tag color="gold" style={{ marginInlineEnd: 0 }}>{inr(here)} adjusted</Tag>}
+            {!here && <Tag style={{ marginInlineEnd: 0 }}>Not adjusted here</Tag>}
+            {onPo > 0 && <div><Text type="secondary" style={{ fontSize: 12 }}>Advance on PO: {inr(onPo)}</Text></div>}
+          </div>
+        );
+      }
     },
     {
       title: 'Status',
@@ -355,6 +382,7 @@ const InvoiceProcessing = () => {
               placeholder="Select PO"
               onChange={(v) => {
                 loadGrns(v);
+                if (!editingInvoice) loadAdvance(v);
                 // TDS defaults from the PO's vendor master; it can be changed for this invoice.
                 const vendor = pos.find((p) => p.id === v)?.Vendor;
                 form.setFieldsValue({
@@ -366,6 +394,28 @@ const InvoiceProcessing = () => {
               options={pos.map((p) => ({ value: p.id, label: p.po_number || `PO-${p.id}` }))}
             />
           </Form.Item>
+          {/* Advance as entered when the PO was issued (read only; the server adjusts it on the invoice). */}
+          {!editingInvoice && (
+            <Space style={{ width: '100%' }} align="start">
+              <Form.Item label="Advance given? (from the PO)" style={{ flex: 1 }}
+                extra={advanceInfo ? undefined : 'Select a PO to see whether an advance was given.'}>
+                <Radio.Group
+                  // Controlled with no onChange: shows the PO's answer and cannot be changed here.
+                  disabled={!advanceInfo}
+                  optionType="button"
+                  buttonStyle="solid"
+                  value={advanceInfo ? !!advanceInfo.given : undefined}
+                  options={[{ label: 'No', value: false }, { label: 'Yes', value: true }]}
+                />
+              </Form.Item>
+              {advanceInfo?.given && (
+                <Form.Item label="Advance amount (from the PO)" style={{ flex: 1 }}
+                  extra={advanceInfo.adjusted > 0 ? `₹${advanceInfo.adjusted.toLocaleString('en-IN')} already adjusted on earlier invoices; ₹${advanceInfo.available.toLocaleString('en-IN')} left.` : undefined}>
+                  <InputNumber readOnly prefix="₹" style={{ width: '100%' }} value={advanceInfo.amount} precision={2} />
+                </Form.Item>
+              )}
+            </Space>
+          )}
           <Form.Item name="grn_id" label="GRN (required for 3-way match)">
             <Select allowClear placeholder="Select the GRN for this PO" onChange={(v) => { if (v) form.setFieldsValue({ ses_id: null }); }} options={grns.map((g) => ({ value: g.id, label: g.grn_number || `GRN-${g.id}` }))} notFoundContent="No GRN yet - receive goods first" />
           </Form.Item>
@@ -411,6 +461,37 @@ const InvoiceProcessing = () => {
               </Form.Item>
             </Space>
           )}
+          {!editingInvoice && advanceInfo && (
+            <Form.Item noStyle shouldUpdate>
+              {({ getFieldValue }) => {
+                const base = Number(getFieldValue('base_amount') || 0);
+                const total = base + Number(getFieldValue('gst_amount') || 0);
+                const tds = getFieldValue('tds_section_code') ? Math.round(base * Number(getFieldValue('tds_rate_percent') || 0)) / 100 : 0;
+                const advance = Math.min(advanceInfo.available, Math.max(0, total - tds));
+                const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+                if (!advanceInfo.given) return null;
+                return (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message={<span>Advance adjusted on this invoice: <b>{inr(advance)}</b></span>}
+                    description={(
+                      <div>
+                        {advanceInfo.available > advance && <div>{inr(advanceInfo.available - advance)} of the advance stays for later invoices on {advanceInfo.po_number}.</div>}
+                        <Descriptions size="small" column={1} style={{ marginTop: 8 }} items={[
+                          { key: 't', label: 'Invoice total', children: inr(total) },
+                          ...(tds ? [{ key: 'd', label: `Less TDS ${getFieldValue('tds_section_code')} @ ${Number(getFieldValue('tds_rate_percent') || 0)}%`, children: `– ${inr(tds)}` }] : []),
+                          { key: 'a', label: 'Less advance adjusted', children: `– ${inr(advance)}` },
+                          { key: 'n', label: <b>Net payable to vendor</b>, children: <b>{inr(Math.max(0, total - tds - advance))}</b> }
+                        ]} />
+                      </div>
+                    )}
+                  />
+                );
+              }}
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 
@@ -428,6 +509,8 @@ const InvoiceProcessing = () => {
             <Descriptions.Item label="Total Amount">₹{Number(viewingInvoice.total_amount || 0).toLocaleString('en-IN')}</Descriptions.Item>
             <Descriptions.Item label="Base Amount">₹{Number(viewingInvoice.base_amount || 0).toLocaleString('en-IN')}</Descriptions.Item>
             <Descriptions.Item label="GST Amount">₹{Number(viewingInvoice.gst_amount || 0).toLocaleString('en-IN')}</Descriptions.Item>
+            {Number(viewingInvoice.advance_adjusted) > 0 && <Descriptions.Item label="Advance adjusted">– ₹{Number(viewingInvoice.advance_adjusted).toLocaleString('en-IN')}</Descriptions.Item>}
+            {Number(viewingInvoice.returns_credit) > 0 && <Descriptions.Item label="Goods returned (incl. GST)">– ₹{Number(viewingInvoice.returns_credit).toLocaleString('en-IN')}</Descriptions.Item>}
             <Descriptions.Item label="Status"><Tag color={STATUS_COLOR[viewingInvoice.status] || 'default'}>{viewingInvoice.status || 'UNPAID'}</Tag></Descriptions.Item>
             <Descriptions.Item label="Match Status"><Tag color={MATCH_STATUS_COLOR[viewingInvoice.matching_status] || 'default'}>{viewingInvoice.matching_status || '—'}</Tag></Descriptions.Item>
             {viewingInvoice.payment_source && <Descriptions.Item label="Payment Source">{viewingInvoice.payment_source}</Descriptions.Item>}
@@ -443,6 +526,7 @@ const InvoiceProcessing = () => {
               </Descriptions.Item>
             )}
           </Descriptions>
+          <JournalEntries module="INVOICE" id={viewingInvoice.id} refreshKey={data} emptyText={invoiceJournalHint(viewingInvoice)} />
           <div style={{ marginTop: 20 }}>
             <ActivityTrail module="INVOICE" id={viewingInvoice.id} refreshKey={data} />
           </div>

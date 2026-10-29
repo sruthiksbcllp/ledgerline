@@ -42,6 +42,7 @@ const PurchaseRequisition = lazy(() => import('./pages/PurchaseRequisition'));
 const PurchaseOrder = lazy(() => import('./pages/PurchaseOrder'));
 const GRNManagement = lazy(() => import('./pages/GRNManagement'));
 const ServiceEntrySheets = lazy(() => import('./pages/ServiceEntrySheets'));
+const PurchaseReturns = lazy(() => import('./pages/PurchaseReturns'));
 const GateEntryManagement = lazy(() => import('./pages/GateEntryManagement'));
 const InvoiceProcessing = lazy(() => import('./pages/InvoiceProcessing'));
 const NumberingConfig = lazy(() => import('./pages/NumberingConfig'));
@@ -167,6 +168,7 @@ function App() {
 
               <Route path="/procurement/grn" element={<GRNManagement />} />
               <Route path="/procurement/ses" element={<ServiceEntrySheets />} />
+              <Route path="/procurement/purchase-returns" element={<PurchaseReturns />} />
               <Route path="/procurement/gate-entry" element={<GateEntryManagement />} />
               <Route path="/procurement/invoices" element={<InvoiceProcessing />} />
               <Route path="/finance/three-way-match" element={<ThreeWayMatch />} />

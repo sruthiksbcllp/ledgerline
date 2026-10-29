@@ -19,6 +19,8 @@ router.get('/balances', readers, wrap(ctrl.balances));
 router.get('/source/:module/:id', readers, wrap(ctrl.bySource));
 // Entry preview on the GRN screen: anyone who may see goods receipts (incl. Warehouse, who records them).
 router.get('/preview/receipt/:poId', requireRead('GRN'), wrap(ctrl.receiptPreview));
+// Advance on a PO, shown when an invoice is entered against it.
+router.get('/preview/advance/:poId', requireRead('PO'), wrap(ctrl.advancePreview));
 router.post('/backfill', rbacMiddleware(['FINANCE']), wrap(ctrl.backfill));
 router.get('/:id', readers, wrap(ctrl.getOne));
 

@@ -9,7 +9,11 @@
  *   Invoice                 Dr GR/IR (+ PPV), Dr Input CGST/SGST/IGST   Cr Vendor (net of TDS), Cr TDS payable  (ref 2.1–2.6)
  *                           no receipt on the PO: Dr the expense directly; GST not creditable: GST into the cost (ref 3.4)
  *   Payment                 Dr Vendor                                   Cr Bank                (ref 5.1–5.2)
- *   Invoice rejected        reversal of the invoice journal
+ *   Advance on a PO         Dr Advances to vendors                      Cr Bank                (ref 4.1–4.2)
+ *                           adjusted on the PO's invoices: Cr Advances to vendors, Vendor credit reduced
+ *   Return before invoice   Dr GR/IR clearing                           Cr Inventory / Expense (ref 1.5)
+ *   Return after invoice    Dr Vendor                                   Cr Inventory / Expense, Cr Input GST (ref 4.3)
+ *   Invoice rejected        reversal of the invoice journal (and of returns posted against it)
  *
  * Posting runs after the business transaction commits and never blocks or fails it. Each event
  * has a dedupe key ("GRN:12", "INVOICE:40"), unique per company, so re-running is harmless and
@@ -21,6 +25,7 @@ const requestContext = require('../utils/requestContext');
 const ACCOUNTS = [
   { code: '1010', name: 'Operating bank account', type: 'ASSET', description: 'Vendor payments are paid from here' },
   { code: '1200', name: 'Inventory', type: 'ASSET', description: 'Goods received for stock' },
+  { code: '1300', name: 'Advances to vendors', type: 'ASSET', description: 'Paid to vendors ahead of their invoice' },
   { code: '1410', name: 'Input IGST', type: 'ASSET', description: 'GST input tax credit – inter-state and imports' },
   { code: '1411', name: 'Input CGST', type: 'ASSET', description: 'GST input tax credit – intra-state' },
   { code: '1412', name: 'Input SGST', type: 'ASSET', description: 'GST input tax credit – intra-state' },
@@ -54,8 +59,11 @@ const tdsOf = (inv) => {
   const tds = round2(inv.tds_amount);
   return Number(inv.paid_amount || 0) > round2(Number(inv.total_amount || 0) - tds) + 0.009 ? 0 : tds;
 };
-/** What the vendor is owed: invoice total less TDS (the TDS goes to the government). */
-const netPayableOf = (inv) => round2(Number(inv?.total_amount || 0) - tdsOf(inv));
+/**
+ * What the vendor is owed: invoice total less TDS (the TDS goes to the government), less the PO
+ * advance set off, less goods returned after the invoice.
+ */
+const netPayableOf = (inv) => round2(Number(inv?.total_amount || 0) - tdsOf(inv) - Number(inv?.advance_adjusted || 0) - Number(inv?.returns_credit || 0));
 
 /** Receipt account for a PO: capex to Capital WIP, opex goods to consumables, services to services expense. */
 const receiptAccount = (po, kind) => {
@@ -187,6 +195,40 @@ async function postSes(sesId, opts = {}) {
   });
 }
 
+/**
+ * Advance on a PO and how much of it is still to be adjusted: the advance less what its invoices
+ * (other than rejected ones) have already set off.
+ */
+async function advanceStatus(poId, { transaction, excludeInvoiceId } = {}) {
+  const { PurchaseOrder, Invoice } = m();
+  const po = poId ? await PurchaseOrder.findByPk(poId, { attributes: ['id', 'po_number', 'advance_given', 'advance_amount'], transaction }) : null;
+  const amount = po?.advance_given ? round2(po.advance_amount) : 0;
+  if (!(amount > 0)) return { given: false, amount: 0, adjusted: 0, available: 0, po_number: po?.po_number || null };
+  const where = { po_id: po.id, status: { [Op.ne]: 'REJECTED' } };
+  if (excludeInvoiceId) where.id = { [Op.ne]: excludeInvoiceId };
+  const adjusted = round2(await Invoice.sum('advance_adjusted', { where, transaction }) || 0);
+  return { given: true, amount, adjusted, available: round2(Math.max(0, amount - adjusted)), po_number: po.po_number };
+}
+
+/** Advance paid to the vendor when the PO is issued with one. */
+async function postAdvance(poId, opts = {}) {
+  const { PurchaseOrder } = m();
+  const po = await PurchaseOrder.findByPk(poId);
+  if (!po || !po.advance_given || ['REJECTED', 'CANCELLED'].includes(po.status)) return null;
+  const amount = round2(po.advance_amount);
+  if (!(amount > 0)) return null;
+  return post({
+    clientId: po.client_id, key: `PO_ADVANCE:${po.id}`, eventType: 'ADVANCE', sourceModule: 'PO', sourceId: po.id,
+    sourceRef: po.po_number, date: po.order_date || po.created_at, vendorId: po.vendor_id, poId: po.id,
+    narration: `Advance paid to vendor on ${po.po_number}`,
+    lines: [
+      { account: '1300', debit: amount, memo: `Advance on ${po.po_number} – adjusted against its invoices` },
+      { account: '1010', credit: amount, memo: 'Bank payment' }
+    ],
+    source: opts.source
+  });
+}
+
 /** An invoice posts once it is matched (or needs no match); an open exception or rejection waits. */
 const invoicePostable = (inv) => inv && !['EXCEPTION', 'REJECTED'].includes(inv.status) && inv.matching_status !== 'MISMATCHED';
 
@@ -217,7 +259,11 @@ async function postInvoice(invoiceId, opts = {}) {
       where: { client_id: inv.client_id, account_code: '2015', memo: { [Op.like]: `%${receipt.ref}%` } },
       include: [{ model: JournalEntry, as: 'entry', attributes: [], where: { event_type: 'INVOICE', status: 'POSTED' } }]
     }) || 0;
-    const open = round2(Math.max(0, receipt.value - Number(cleared)));
+    // Goods sent back before this invoice already came off GR/IR (Dr GR/IR on the return).
+    const returnedBefore = inv.grn_id
+      ? Number(await m().PurchaseReturn.sum('total_value', { where: { grn_id: inv.grn_id, stage: 'BEFORE_INVOICE' } }) || 0)
+      : 0;
+    const open = round2(Math.max(0, receipt.value - Number(cleared) - returnedBefore));
     const clear = round2(Math.min(base, open));
     if (clear > 0) lines.push({ account: '2015', debit: clear, memo: `Clear GR/IR – ${receipt.ref}` });
     if (base - clear > 0.009) lines.push({ account: '5010', debit: round2(base - clear), memo: `Invoiced above the received value of ${receipt.ref}` });
@@ -237,14 +283,79 @@ async function postInvoice(invoiceId, opts = {}) {
       }
     }
   }
-  lines.push({ account: '2010', credit: round2(gross - tds), memo: `${inv.invoice_number}${tds ? ' – net of TDS' : ''}` });
+  const advance = round2(inv.advance_adjusted);
+  const netOf = [tds && 'TDS', advance && 'advance'].filter(Boolean).join(' and ');
+  lines.push({ account: '2010', credit: round2(gross - tds - advance), memo: `${inv.invoice_number}${netOf ? ` – net of ${netOf}` : ''}` });
   if (tds) lines.push({ account: '2160', credit: tds, memo: `TDS u/s ${inv.tds_section_code} @ ${Number(inv.tds_rate_percent || 0)}% on taxable value ₹${inr(base)}` });
+  if (advance) lines.push({ account: '1300', credit: advance, memo: `Advance paid on ${po?.po_number || 'the PO'} adjusted` });
 
-  return post({
+  const entry = await post({
     clientId: inv.client_id, key: `INVOICE:${inv.id}`, eventType: 'INVOICE', sourceModule: 'INVOICE', sourceId: inv.id,
     sourceRef: inv.invoice_number, date: inv.invoice_date || inv.created_at, vendorId: inv.vendor_id, poId: inv.po_id, invoiceId: inv.id,
     narration: `Vendor invoice ${inv.invoice_number}${receipt ? ` against ${receipt.ref}` : ''}`, lines, source: opts.source
   });
+  // Returns recorded while the invoice waited on a match exception post now, after it.
+  if (entry) {
+    for (const r of await m().PurchaseReturn.findAll({ where: { invoice_id: inv.id, stage: 'AFTER_INVOICE' }, attributes: ['id'] })) {
+      await postReturn(r.id, opts);
+    }
+  }
+  return entry;
+}
+
+/**
+ * Goods sent back to the vendor. Before the invoice: reverse the receipt (Dr GR/IR, Cr the receipt
+ * account). After it: Dr the vendor for the value plus its share of the invoice GST, Cr the cost and
+ * the input GST; this waits until the invoice journal itself is posted.
+ */
+async function postReturn(returnId, opts = {}) {
+  const { PurchaseReturn, PurchaseOrder, GRN, Invoice, JournalEntry } = m();
+  const ret = await PurchaseReturn.findByPk(returnId);
+  if (!ret || !(Number(ret.total_value) > 0)) return null;
+  const po = ret.po_id ? await PurchaseOrder.findByPk(ret.po_id) : null;
+  const grn = await GRN.findByPk(ret.grn_id, { attributes: ['id', 'grn_number'] });
+  const costAcct = receiptAccount(po, 'GOODS');
+  const value = round2(ret.total_value);
+  const base = {
+    clientId: ret.client_id, key: `RETURN:${ret.id}`, eventType: 'PURCHASE_RETURN', sourceModule: 'RETURN', sourceId: ret.id,
+    sourceRef: ret.return_number, date: ret.return_date, vendorId: ret.vendor_id, poId: ret.po_id, source: opts.source
+  };
+
+  if (ret.stage !== 'AFTER_INVOICE') {
+    return post({
+      ...base,
+      narration: `Goods returned to vendor before invoicing – ${ret.return_number} against ${grn?.grn_number || 'the GRN'}`,
+      lines: [
+        { account: '2015', debit: value, memo: `Return ${ret.return_number} / ${grn?.grn_number || ''}` },
+        { account: costAcct, credit: value, memo: String(ret.reason || 'Returned to vendor').slice(0, 255) }
+      ]
+    });
+  }
+
+  const inv = ret.invoice_id ? await Invoice.findByPk(ret.invoice_id) : null;
+  if (!inv) return null;
+  const invoiceEntry = await JournalEntry.findOne({ where: { client_id: ret.client_id, dedupe_key: `INVOICE:${inv.id}`, status: 'POSTED' }, attributes: ['id'] });
+  if (!invoiceEntry) return null; // posts with the invoice once its match exception is resolved
+  const gst = round2(ret.gst_amount);
+  const lines = [{ account: '2010', debit: round2(value + gst), memo: `Return ${ret.return_number} against ${inv.invoice_number}` },
+    { account: costAcct, credit: value, memo: String(ret.reason || 'Returned to vendor').slice(0, 255) }];
+  if (gst > 0) {
+    if (inv.itc_eligible === false) {
+      lines.push({ account: costAcct, credit: gst, memo: 'GST on returned goods (was part of cost)' });
+    } else {
+      // Same CGST/SGST/IGST split as the invoice; otherwise all to input IGST, as the invoice posted it.
+      const ig = Number(inv.gst_amount || 0);
+      const c = Number(inv.cgst_amount || 0), s = Number(inv.sgst_amount || 0), i = Number(inv.igst_amount || 0);
+      if (ig > 0 && Math.abs(c + s + i - ig) < 0.02) {
+        const cg = round2(gst * c / ig), sg = round2(gst * s / ig);
+        lines.push({ account: '1411', credit: cg, memo: 'Input CGST reversed' }, { account: '1412', credit: sg, memo: 'Input SGST reversed' },
+          { account: '1410', credit: round2(gst - cg - sg), memo: 'Input IGST reversed' });
+      } else {
+        lines.push({ account: '1410', credit: gst, memo: 'Input GST reversed' });
+      }
+    }
+  }
+  return post({ ...base, invoiceId: inv.id, narration: `Goods returned to vendor after invoice ${inv.invoice_number} – ${ret.return_number}`, lines });
 }
 
 /** Rejected after posting: reverse the invoice journal (debits and credits swapped). */
@@ -263,6 +374,20 @@ async function reverseInvoice(invoiceId, opts = {}) {
     reversalOfId: original.id, source: opts.source
   });
   if (entry) await original.update({ status: 'REVERSED' });
+  // Returns posted against the rejected invoice are reversed with it.
+  for (const r of await m().PurchaseReturn.findAll({ where: { invoice_id: inv.id, stage: 'AFTER_INVOICE' }, attributes: ['id', 'return_number'] })) {
+    const rj = await JournalEntry.findOne({ where: { client_id: inv.client_id, dedupe_key: `RETURN:${r.id}`, status: 'POSTED' } });
+    if (!rj) continue;
+    const rl = await JournalLine.findAll({ where: { journal_entry_id: rj.id }, order: [['line_no', 'ASC']] });
+    const rev = await post({
+      clientId: inv.client_id, key: `RETURN_REVERSAL:${r.id}`, eventType: 'REVERSAL', sourceModule: 'RETURN', sourceId: r.id,
+      sourceRef: r.return_number, date: inv.rejected_at || new Date(), vendorId: inv.vendor_id, poId: inv.po_id, invoiceId: inv.id,
+      narration: `Reversal of ${rj.je_number} – invoice ${inv.invoice_number} rejected`,
+      lines: rl.map((l) => ({ account: l.account_code, accountName: l.account_name, debit: l.credit, credit: l.debit, memo: `Reverse: ${l.memo || ''}` })),
+      reversalOfId: rj.id, source: opts.source
+    });
+    if (rev) await rj.update({ status: 'REVERSED' });
+  }
   return entry;
 }
 
@@ -329,7 +454,13 @@ const changed = (row, field) => typeof row.changed === 'function' && row.changed
 
 function install(db) {
   models = db;
-  const { GRN, ServiceEntrySheet, Invoice, ApPayment } = db;
+  const { GRN, ServiceEntrySheet, Invoice, ApPayment, PurchaseOrder, PurchaseReturn } = db;
+  if (PurchaseReturn) PurchaseReturn.addHook('afterCreate', 'apJournal', (row, o) => schedule(o, `return ${row.id}`, () => postReturn(row.id)));
+  if (PurchaseOrder) {
+    PurchaseOrder.addHook('afterCreate', 'apJournal', (row, o) => {
+      if (row.advance_given) schedule(o, `PO ${row.id} advance`, () => postAdvance(row.id));
+    });
+  }
   if (GRN) GRN.addHook('afterCreate', 'apJournal', (row, o) => schedule(o, `GRN ${row.id}`, () => postGrn(row.id)));
   if (ServiceEntrySheet) {
     ServiceEntrySheet.addHook('afterUpdate', 'apJournal', (row, o) => {
@@ -337,6 +468,18 @@ function install(db) {
     });
   }
   if (Invoice) {
+    // Set off what is left of the PO's advance against a new invoice, up to what the vendor is owed.
+    Invoice.addHook('beforeCreate', 'apJournalAdvance', async (row, o) => {
+      if (!row.po_id || Number(row.advance_adjusted || 0) > 0) return;
+      try {
+        const { available } = await advanceStatus(row.po_id, { transaction: o?.transaction });
+        const owed = round2(Number(row.total_amount || 0) - (row.tds_section_code ? Number(row.tds_amount || 0) : 0));
+        const setOff = round2(Math.min(available, Math.max(0, owed)));
+        if (setOff > 0) row.advance_adjusted = setOff;
+      } catch (e) {
+        console.error('[apJournal] advance not adjusted:', e.message);
+      }
+    });
     Invoice.addHook('afterCreate', 'apJournal', (row, o) => {
       schedule(o, `invoice ${row.id}`, () => postInvoice(row.id), INVOICE_SETTLE_MS);
     });
@@ -354,23 +497,25 @@ function install(db) {
 
 /** Post journals for documents that existed before the engine (or missed one). Idempotent. */
 async function backfill(clientId) {
-  const { GRN, ServiceEntrySheet, Invoice, ApPayment } = m();
+  const { GRN, ServiceEntrySheet, Invoice, ApPayment, PurchaseOrder } = m();
   const where = { client_id: clientId };
   const opts = { source: 'BACKFILL' };
   const out = { posted: 0, failed: [] };
   const tryPost = async (label, fn) => {
     try { if (await fn()) out.posted += 1; } catch (e) { out.failed.push(`${label}: ${e.message}`); }
   };
+  for (const p of await PurchaseOrder.findAll({ where: { ...where, advance_given: true }, attributes: ['id'], order: [['id', 'ASC']] })) await tryPost(`PO ${p.id} advance`, () => postAdvance(p.id, opts));
   for (const g of await GRN.findAll({ where, attributes: ['id'], order: [['id', 'ASC']] })) await tryPost(`GRN ${g.id}`, () => postGrn(g.id, opts));
   for (const s of await ServiceEntrySheet.findAll({ where: { ...where, status: 'APPROVED' }, attributes: ['id'], order: [['id', 'ASC']] })) await tryPost(`SES ${s.id}`, () => postSes(s.id, opts));
   const invoices = await Invoice.findAll({ where, attributes: ['id', 'status'], order: [['id', 'ASC']] });
   for (const i of invoices) await tryPost(`invoice ${i.id}`, () => postInvoice(i.id, opts));
+  for (const r of await m().PurchaseReturn.findAll({ where, attributes: ['id'], order: [['id', 'ASC']] })) await tryPost(`return ${r.id}`, () => postReturn(r.id, opts));
   for (const p of await ApPayment.findAll({ where, attributes: ['id'], order: [['id', 'ASC']] })) await tryPost(`payment ${p.id}`, () => postPayment(p.id, opts));
   for (const i of invoices.filter((x) => x.status === 'PAID')) await tryPost(`settlement ${i.id}`, () => postSettlement(i.id, opts));
   return out;
 }
 
 module.exports = {
-  ACCOUNTS, install, backfill, ensureAccounts, tdsOf, netPayableOf, receiptAccountsFor,
-  postGrn, postSes, postInvoice, reverseInvoice, postPayment, postSettlement
+  ACCOUNTS, install, backfill, ensureAccounts, tdsOf, netPayableOf, receiptAccountsFor, advanceStatus,
+  postAdvance, postGrn, postSes, postInvoice, postReturn, reverseInvoice, postPayment, postSettlement
 };

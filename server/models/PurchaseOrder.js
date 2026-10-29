@@ -47,6 +47,8 @@ module.exports = (sequelize) => {
     po_payment_terms: { type: DataTypes.STRING(255), allowNull: true },
     po_terms: { type: DataTypes.TEXT, allowNull: true },
     total_amount: { type: DataTypes.DECIMAL(15, 2) },
+    advance_given: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // advance to vendor entered at PO issue
+    advance_amount: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
     order_date: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     required_date: { type: DataTypes.DATE },
     status: { 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Card, Tag, Space, Modal, Form, Select, InputNumber, Button, message, Typography, Empty, Input, Drawer, Descriptions } from 'antd';
+import { Table, Card, Tag, Space, Modal, Form, Select, InputNumber, Button, message, Typography, Empty, Input, Drawer, Descriptions, Radio } from 'antd';
 import { Plus, Truck, RefreshCcw, Printer, Mail, Eye, Trash2, ListChecks } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
@@ -228,6 +228,8 @@ const PurchaseOrder = () => {
         property_id: values.property_id,
         vendor_id: values.vendor_id,
         total_amount: poTotal,
+        advance_given: !!values.advance_given,
+        advance_amount: values.advance_given ? values.advance_amount : undefined,
         items: sourceType === 'QUOTATION' ? undefined : poLineItems.filter((it) => it.item_name),
         item_description: values.item_description,
         location_id: sourceType === 'DIRECT' ? values.location_id : undefined,
@@ -399,6 +401,25 @@ const PurchaseOrder = () => {
             <span>Grand Total:</span><span style={{ fontSize: 16 }}>{'\u20B9' + poTotal.toLocaleString('en-IN')}</span>
           </div>
 
+          <Form.Item name="advance_given" label="Advance given?" initialValue={false}>
+            <Radio.Group optionType="button" buttonStyle="solid" options={[{ label: 'No', value: false }, { label: 'Yes', value: true }]} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.advance_given !== cur.advance_given}>
+            {({ getFieldValue }) => getFieldValue('advance_given') && (
+              <Form.Item
+                name="advance_amount"
+                label="Advance amount"
+                extra={poTotal > 0 ? `Up to the PO total of \u20B9${poTotal.toLocaleString('en-IN')}` : undefined}
+                rules={[
+                  { required: true, message: 'Enter the advance amount' },
+                  { validator: (_, v) => (v === undefined || v === null || (Number(v) > 0 && Number(v) <= poTotal) ? Promise.resolve() : Promise.reject(new Error(Number(v) > poTotal ? 'Advance cannot be more than the PO total' : 'Advance must be more than \u20B90'))) }
+                ]}
+              >
+                <InputNumber min={0} precision={2} prefix={'\u20B9'} style={{ width: '100%' }} placeholder="Amount paid to the vendor in advance" />
+              </Form.Item>
+            )}
+          </Form.Item>
+
           {/* Phase 3b: resolve the DOA chain so the initiator can pick approvers for any manual level */}
           <div style={{ margin: '0 0 12px' }}>
             <Button size="small" loading={chainLoading} onClick={checkChain} icon={<ListChecks size={14} />}>Check approval chain</Button>
@@ -469,6 +490,7 @@ const PurchaseOrder = () => {
               <Descriptions.Item label="Location">{viewPo.Location?.location_name || 'N/A'}</Descriptions.Item>
               <Descriptions.Item label="Requested By">{viewPo.requestor_name || viewPo.PurchaseRequisition?.requestor_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Total Amount">{'₹' + Number(viewPo.total_amount || 0).toLocaleString('en-IN')}</Descriptions.Item>
+              <Descriptions.Item label="Advance given">{viewPo.advance_given ? '₹' + Number(viewPo.advance_amount || 0).toLocaleString('en-IN') : 'No'}</Descriptions.Item>
               <Descriptions.Item label="Order Date">{viewPo.order_date ? new Date(viewPo.order_date).toLocaleDateString() : '-'}</Descriptions.Item>
               {viewPo.approval_comment ? <Descriptions.Item label="Comment for approver" span={2}>{viewPo.approval_comment}</Descriptions.Item> : null}
             </Descriptions>

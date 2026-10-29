@@ -1,14 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Card, Empty, Row, Space, Table, Tag, Typography, message, Modal, Descriptions } from 'antd';
-import { RefreshCcw, PackageCheck, Eye } from 'lucide-react';
+import { RefreshCcw, PackageCheck, Eye, Undo2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import GRNDrawer from '../components/procurement/GRNDrawer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
+import ReturnToVendorModal from '../components/procurement/ReturnToVendorModal';
+import { getStoredUser } from '../utils/session';
 
 const { Title, Text } = Typography;
+
+// Roles that record returns to the vendor (the server enforces the same list; admins always may).
+const RETURN_ROLES = ['WAREHOUSE', 'PROCUREMENT', 'ACCOUNTS_PAYABLE', 'FINANCE', 'ADMIN', 'CLIENT_ADMIN', 'SUPER_ADMIN', 'PROVIDER_ADMIN', 'DEV_ADMIN'];
+const RETURN_STATUS = { RETURNED: ['Returned', 'blue'], AWAITING_CREDIT_NOTE: ['Awaiting credit note', 'orange'], CREDIT_NOTE_RECEIVED: ['Credit note received', 'green'] };
 
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
 
@@ -22,9 +28,17 @@ const GRNManagement = () => {
   const [viewGrn, setViewGrn] = useState(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewJournals, setViewJournals] = useState([]); // AP journal entries posted for the GRN
+  const [viewReturns, setViewReturns] = useState([]); // returns to vendor recorded on the GRN
+  const [returnOpen, setReturnOpen] = useState(false);
+  const canReturn = RETURN_ROLES.includes(String(getStoredUser()?.role || '').toUpperCase());
+
+  const loadReturns = (grnId) => api.get('/purchase-returns', { params: { grn_id: grnId } })
+    .then((r) => setViewReturns(normalizeResponse(r?.data)))
+    .catch(() => setViewReturns([]));
 
   const openView = async (grn) => {
-    setViewGrn({ ...grn }); setViewLoading(true); setViewJournals([]);
+    setViewGrn({ ...grn }); setViewLoading(true); setViewJournals([]); setViewReturns([]);
+    loadReturns(grn.id);
     // Roles without AP journal access (e.g. Warehouse) just do not see this section.
     api.get(`/ap-journals/source/GRN/${grn.id}`).then((r) => setViewJournals(normalizeResponse(r?.data))).catch(() => setViewJournals([]));
     try {
@@ -184,6 +198,29 @@ const GRNManagement = () => {
               pagination={false}
               locale={{ emptyText: 'No line items' }}
             />
+            <div style={{ marginTop: 20 }}>
+              <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+                <Text strong>Returns to vendor{viewReturns.length ? ` (${viewReturns.length})` : ''}</Text>
+                {canReturn && <Button icon={<Undo2 size={14} />} onClick={() => setReturnOpen(true)}>Return to vendor</Button>}
+              </Space>
+              {viewReturns.length === 0
+                ? <Text type="secondary">No goods returned on this GRN.</Text>
+                : (
+                  <Table
+                    rowKey="id"
+                    size="small"
+                    pagination={false}
+                    dataSource={viewReturns}
+                    columns={[
+                      { title: 'Return', dataIndex: 'return_number', key: 'no' },
+                      { title: 'Date', dataIndex: 'return_date', key: 'date', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '-') },
+                      { title: 'Items', key: 'items', render: (_, r) => (r.items || []).map((i) => `${Number(i.quantity)} × ${i.item_name}`).join(', ') },
+                      { title: 'Amount', dataIndex: 'total_amount', key: 'amt', align: 'right', render: (v) => `₹${Number(v || 0).toLocaleString('en-IN')}` },
+                      { title: 'Status', dataIndex: 'status', key: 'st', render: (v) => <Tag color={RETURN_STATUS[v]?.[1]}>{RETURN_STATUS[v]?.[0] || v}</Tag> }
+                    ]}
+                  />
+                )}
+            </div>
             {viewJournals.map((je) => (
               <div key={je.id} style={{ marginTop: 20 }}>
                 <Space size={8} style={{ marginBottom: 8 }}>
@@ -210,6 +247,13 @@ const GRNManagement = () => {
           </>
         )}
       </Modal>
+
+      <ReturnToVendorModal
+        grn={viewGrn}
+        open={returnOpen}
+        onClose={() => setReturnOpen(false)}
+        onSaved={() => { if (viewGrn) loadReturns(viewGrn.id); load(); }}
+      />
     </div>
   );
 };

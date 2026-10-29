@@ -17,7 +17,7 @@ import {
   SendHorizontal, Settings, Settings2, Shield, ShieldAlert, ShieldCheck, ShoppingCart,
   Star, Sun, Tag, Ticket, ToggleLeft, Trash2, TrendingDown, TrendingUp,
   User, UserCheck, Users, Users2, WalletCards, Wrench, Menu as LucideMenu,
-  HandCoins, Sparkles, Mail,
+  HandCoins, Sparkles, Mail, Undo2,
 } from 'lucide-react';
 
 
@@ -352,6 +352,7 @@ const MainLayout = ({ children }) => {
         { key: '/procurement/purchase-orders', icon: <ShoppingCart size={16} />, label: 'Purchase Orders (PO)', hidden: !canSeeProcurement },
         { key: '/procurement/gate-entry', icon: <ShieldCheck size={16} />, label: 'Gate Entry & QC', hidden: !canSeeProcurement },
         { key: '/procurement/grn', icon: <PackageCheck size={16} />, label: 'Goods Receipt (GRN)', hidden: !canSeeProcurement },
+        { key: '/procurement/purchase-returns', icon: <Undo2 size={16} />, label: 'Purchase Returns', hidden: !canSeeProcurement },
         { key: '/procurement/ses', icon: <ClipboardCheck size={16} />, label: 'Service Entry Sheet (SES)', hidden: !canSeeProcurement },
         { key: '/finance/ap/ai-invoices', icon: <Sparkles size={16} />, label: 'AI Invoice Processing', hidden: !canSeeApAutomation },
         { key: '/procurement/invoices', icon: <ReceiptIndianRupee size={16} />, label: 'Invoice Processing', hidden: !canSeeProcurement || features?.ENABLE_INVOICE_MODULE === false },

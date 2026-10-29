@@ -593,7 +593,7 @@ exports.createPO = async (req, res, next) => {
       pr_id, quotation_id, source_type = 'PR',
       property_id, vendor_id, items: bodyItems, total_amount: bodyAmount, approval_comment,
       po_warranty, po_payment_terms, po_terms,
-      manual_approvers
+      manual_approvers, advance_given, advance_amount
     } = req.body;
 
     const fail = async (message, code = 400) => {
@@ -704,6 +704,12 @@ exports.createPO = async (req, res, next) => {
     // provided amount only when lines are unpriced (backward compatible).
     finalTotal = calculatedTotal > 0 ? calculatedTotal : Number(finalTotal || 0);
 
+    // Advance to the vendor: only when marked as given, more than zero and within the PO total.
+    const advanceGiven = advance_given === true || advance_given === 'true';
+    const advanceAmount = advanceGiven ? Math.round(Number(advance_amount || 0) * 100) / 100 : null;
+    if (advanceGiven && !(advanceAmount > 0)) return fail('Enter the advance amount');
+    if (advanceGiven && advanceAmount > Number(finalTotal || 0)) return fail('Advance cannot be more than the PO total');
+
     const requestedClientId = getClientId(req);
     const tenantCandidates = [requestedClientId, sourceClientId, prop.client_id, vend.client_id, quotationClientId]
       .filter((value) => value !== null && value !== undefined && value !== '')
@@ -762,6 +768,8 @@ exports.createPO = async (req, res, next) => {
       requestor_name: requestor_name_val,
       type: po_type_val,
       total_amount: finalTotal,
+      advance_given: advanceGiven,
+      advance_amount: advanceAmount,
       approval_comment: approval_comment || null,
       po_warranty: po_warranty || null,
       po_payment_terms: po_payment_terms || null,

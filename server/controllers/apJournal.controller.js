@@ -83,6 +83,14 @@ exports.receiptPreview = async (req, res) => {
   return res.json({ success: true, data: { po_id: po.id, po_type: po.type || null, ...journals.receiptAccountsFor(po, kind) } });
 };
 
+/** Advance given on this PO and how much is still to be adjusted against its invoices (Create Invoice). */
+exports.advancePreview = async (req, res) => {
+  const { PurchaseOrder } = require('../models');
+  const po = await PurchaseOrder.findOne({ where: { id: req.params.poId, client_id: clientOf(req) }, attributes: ['id'] });
+  if (!po) return res.status(404).json({ success: false, message: 'Purchase Order not found' });
+  return res.json({ success: true, data: await journals.advanceStatus(po.id) });
+};
+
 /** Debit, credit and balance per account. A reversal and the journal it reverses net to zero. */
 exports.balances = async (req, res) => {
   const clientId = clientOf(req);

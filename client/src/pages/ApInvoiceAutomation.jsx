@@ -6,11 +6,12 @@ import {
 import { CheckCircle2, FilePlus2, PenLine, ReceiptIndianRupee, RefreshCcw, Sparkles, Trash2, XCircle } from 'lucide-react';
 import dayjs from 'dayjs';
 import api from '../utils/api';
-import { inr } from '../utils/apLedger';
+import { inr, invoiceJournalHint } from '../utils/apLedger';
 import { ChecksPanel, DocumentDropzone, StatusTag } from '../components/finance/DocumentReview';
 import { checkUploadFile, markProps } from '../utils/documentReview';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import InvoiceDocument from '../components/procurement/InvoiceDocument';
+import { JournalEntries } from '../components/finance/JournalEntries';
 
 const { Text } = Typography;
 
@@ -501,12 +502,20 @@ const ApInvoiceAutomation = () => {
               <Descriptions.Item label="GST">{inr(detail.gst_amount)}</Descriptions.Item>
               <Descriptions.Item label="Total"><Text strong>{inr(detail.total_amount)}</Text></Descriptions.Item>
               {Number(detail.tds_deducted) > 0 && (
-                <>
-                  <Descriptions.Item label={`TDS u/s ${detail.tds_section_code} @ ${Number(detail.tds_rate_percent || 0)}%`}>− {inr(detail.tds_deducted)}</Descriptions.Item>
-                  <Descriptions.Item label="Net payable to vendor">{inr(detail.net_payable)}</Descriptions.Item>
-                </>
+                <Descriptions.Item label={`TDS u/s ${detail.tds_section_code} @ ${Number(detail.tds_rate_percent || 0)}%`}>− {inr(detail.tds_deducted)}</Descriptions.Item>
               )}
-              <Descriptions.Item label="Balance due"><Text strong>{inr(detail.balance)}</Text></Descriptions.Item>
+              {Number(detail.advance_adjusted) > 0 && (
+                <Descriptions.Item label="Advance adjusted">− {inr(detail.advance_adjusted)}</Descriptions.Item>
+              )}
+              {Number(detail.returns_credit) > 0 && (
+                <Descriptions.Item label="Goods returned (incl. GST)">− {inr(detail.returns_credit)}</Descriptions.Item>
+              )}
+              {(Number(detail.tds_deducted) > 0 || Number(detail.advance_adjusted) > 0 || Number(detail.returns_credit) > 0) && (
+                <Descriptions.Item label="Net payable to vendor">{inr(detail.net_payable)}</Descriptions.Item>
+              )}
+              {Number(detail.balance) < 0
+                ? <Descriptions.Item label="Vendor owes us"><Text strong type="danger">{inr(-Number(detail.balance))}</Text> <Text type="secondary">(refund or set off on the next invoice)</Text></Descriptions.Item>
+                : <Descriptions.Item label="Balance due"><Text strong>{inr(detail.balance)}</Text></Descriptions.Item>}
               <Descriptions.Item label="Vendor invoice" span={2}>
                 <InvoiceDocument
                   url={detail.document_url}
@@ -532,6 +541,7 @@ const ApInvoiceAutomation = () => {
                 { title: 'Amount', dataIndex: 'amount', align: 'right', render: (v) => inr(v) },
               ]} />
             )}
+            <JournalEntries module="INVOICE" id={detail.id} refreshKey={detail} emptyText={invoiceJournalHint(detail)} />
             <ActivityTrail module="INVOICE" id={detail.id} refreshKey={detail} />
           </Space>
         )}

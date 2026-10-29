@@ -113,3 +113,11 @@ export function writeApStore(next) {
 export function isOpenInvoice(inv) {
   return inv && inv.status !== 'PAID';
 }
+
+/** Why an invoice has no journal yet, per the posting rules in services/apJournal.service.js. */
+export const invoiceJournalHint = (inv) => {
+  if (!inv) return undefined;
+  if (inv.status === 'REJECTED') return 'Rejected invoice: no journal entry (any earlier entry was reversed).';
+  if (inv.status === 'EXCEPTION' || inv.matching_status === 'MISMATCHED') return 'The invoice entry posts once the 3-way match exception is resolved.';
+  return 'The invoice entry is being posted. Reopen in a few seconds.';
+};

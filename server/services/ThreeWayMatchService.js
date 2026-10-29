@@ -2,7 +2,8 @@
 
 const { Op } = require('sequelize');
 const {
-  Invoice, PurchaseOrder, GRN, GRNItem, PurchaseOrderItem, ThreeWayMatch, APToleranceRule, ServiceEntrySheet
+  Invoice, PurchaseOrder, GRN, GRNItem, PurchaseOrderItem, ThreeWayMatch, APToleranceRule, ServiceEntrySheet,
+  PurchaseReturn, PurchaseReturnItem
 } = require('../models');
 
 const toNumber = (v) => Number(v || 0);
@@ -64,7 +65,11 @@ class ThreeWayMatchService {
     ]);
 
     const poQty = poItems.reduce((s, i) => s + toNumber(i.quantity), 0);
-    const grnQty = grnItems.reduce((s, i) => s + toNumber(i.accepted_quantity || i.received_quantity), 0);
+    // Quantity kept: accepted on the GRN less anything returned to the vendor since.
+    const returned = PurchaseReturnItem
+      ? toNumber(await PurchaseReturnItem.sum('quantity', { include: [{ model: PurchaseReturn, as: 'purchaseReturn', attributes: [], where: { grn_id: grn.id } }] }))
+      : 0;
+    const grnQty = grnItems.reduce((s, i) => s + toNumber(i.accepted_quantity || i.received_quantity), 0) - returned;
     const invoiceAmount = toNumber(invoice.total_amount || (toNumber(invoice.base_amount) + toNumber(invoice.gst_amount)));
     const poAmount = toNumber(po.total_amount);
 

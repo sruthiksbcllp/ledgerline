@@ -26,6 +26,7 @@ const DEFAULTS = {
   RFQ:       { prefix: 'RFQ', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
   INVOICE:   { prefix: 'INV', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
   SES:       { prefix: 'SES', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  RETURN:    { prefix: 'PRN', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 }, // purchase return to vendor
 };
 
 /**
