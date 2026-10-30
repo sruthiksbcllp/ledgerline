@@ -208,15 +208,20 @@ async function syncVendor(clientId, vendorId, ctx = {}) {
     const send = (b) => (existing?.external_id ? zoho(row, 'PUT', `/contacts/${existing.external_id}`, b) : zoho(row, 'POST', '/contacts', b));
     try {
       const res = await send(body);
-      return { id: res.contact.contact_id, ref: v.vendor_name };
+      return { id: res.contact.contact_id, ref: `${v.vendor_name} | GST ${gstin || 'none'}` };
     } catch (e) {
       if (e.code !== 'ZOHO_BAD_GSTIN') throw e;
       // Zoho validates the GSTIN; send the vendor without it rather than holding back its bills.
       const { gst_no: _g, place_of_contact: _p, ...rest } = body;
       const res = await send({ ...rest, gst_treatment: 'business_none' });
-      return { id: res.contact.contact_id, ref: v.vendor_name, warning: `${NO_GSTIN}: Zoho Books rejected GSTIN ${gstin}. Correct it in Vendor Master, then use Sync now to update the vendor.` };
+      return { id: res.contact.contact_id, ref: `${v.vendor_name} | GST none`, warning: `${NO_GSTIN}: Zoho Books rejected GSTIN ${gstin}. Correct it in Vendor Master, then use Sync now to update the vendor.` };
     }
-  }, { resync: Boolean(ctx.resync) || String(existing?.last_error || '').startsWith(NO_GSTIN) }); // retried until Zoho takes the GSTIN
+  }, {
+    // Retried until Zoho takes the GSTIN, and re-sent whenever the GSTIN differs from what Zoho was given
+    // (e.g. a vendor created before GST was switched on in Zoho Books).
+    resync: Boolean(ctx.resync) || String(existing?.last_error || '').startsWith(NO_GSTIN)
+      || Boolean(existing?.external_id && !String(existing.external_ref || '').endsWith(`| GST ${String(v.gst_number || '').trim().toUpperCase() || 'none'}`))
+  });
 }
 
 /** The bill, plus the PO advance and any returns / cash discount applied to it. */
@@ -237,31 +242,42 @@ async function syncBill(clientId, invoiceId, ctx = {}) {
   const billLink = await track(clientId, 'BILL', inv.id, async () => {
     // A vendor Zoho took without its GSTIN gets bills as not GST-registered too.
     const gstin = String(vendorLink.last_error || '').startsWith(NO_GSTIN) ? '' : String(vendor?.gst_number || '').trim().toUpperCase();
+    const send = (gstInAmount) => {
+      const taxId = gstInAmount ? null : gstTaxFor(inv, lk);
+      return zoho(row, 'POST', '/bills', {
+        vendor_id: vendorLink.external_id,
+        bill_number: inv.invoice_number,
+        date: day(inv.invoice_date || inv.created_at),
+        ...(inv.due_date ? { due_date: day(inv.due_date) } : {}),
+        reference_number: po?.po_number || undefined,
+        gst_treatment: gstin && !gstInAmount ? 'business_gst' : 'business_none',
+        ...(gstin && !gstInAmount ? { gst_no: gstin } : {}),
+        ...(stateOf(gstin) && !gstInAmount ? { source_of_supply: stateOf(gstin) } : {}),
+        line_items: [{
+          account_id: accountFor(costCode, row, lk),
+          description: `${inv.ses_id ? 'Services' : 'Goods'} per ${po?.po_number || 'invoice'} ${inv.invoice_number}`.slice(0, 2000),
+          rate: gstInAmount ? round2(inv.total_amount) : round2(inv.base_amount || Number(inv.total_amount || 0) - Number(inv.gst_amount || 0)),
+          quantity: 1,
+          ...(taxId ? { tax_id: taxId } : {}),
+          ...(inv.hsn_sac_code ? { hsn_or_sac: inv.hsn_sac_code } : {})
+        }]
+      });
+    };
     // An unregistered vendor (no valid GSTIN) cannot charge GST in Zoho: the GST goes into the amount, so
-    // the bill total still matches LedgerLine and the payments settle it.
-    const gstInAmount = !gstin && Number(inv.gst_amount || 0) > 0;
-    const taxId = gstInAmount ? null : gstTaxFor(inv, lk);
-    const res = await zoho(row, 'POST', '/bills', {
-      vendor_id: vendorLink.external_id,
-      bill_number: inv.invoice_number,
-      date: day(inv.invoice_date || inv.created_at),
-      ...(inv.due_date ? { due_date: day(inv.due_date) } : {}),
-      reference_number: po?.po_number || undefined,
-      gst_treatment: gstin ? 'business_gst' : 'business_none',
-      ...(gstin ? { gst_no: gstin } : {}),
-      ...(stateOf(gstin) ? { source_of_supply: stateOf(gstin) } : {}),
-      line_items: [{
-        account_id: accountFor(costCode, row, lk),
-        description: `${inv.ses_id ? 'Services' : 'Goods'} per ${po?.po_number || 'invoice'} ${inv.invoice_number}`.slice(0, 2000),
-        rate: gstInAmount ? round2(inv.total_amount) : round2(inv.base_amount || Number(inv.total_amount || 0) - Number(inv.gst_amount || 0)),
-        quantity: 1,
-        ...(taxId ? { tax_id: taxId } : {}),
-        ...(inv.hsn_sac_code ? { hsn_or_sac: inv.hsn_sac_code } : {})
-      }]
-    });
+    // the bill total still matches LedgerLine and the payments settle it. Also used when Zoho holds the
+    // vendor as unregistered and refuses GST on the bill (reverse charge).
+    let gstInAmount = !gstin && Number(inv.gst_amount || 0) > 0;
+    let res;
+    try {
+      res = await send(gstInAmount);
+    } catch (e) {
+      if (gstInAmount || !/reverse charge/i.test(e.message) || !(Number(inv.gst_amount || 0) > 0)) throw e;
+      gstInAmount = true;
+      res = await send(true);
+    }
     return {
       id: res.bill.bill_id, ref: res.bill.bill_number,
-      ...(gstInAmount ? { warning: `GST of ₹${round2(inv.gst_amount)} included in the bill amount: the vendor has no GSTIN that Zoho Books accepts, so Zoho does not allow GST on its bills.` } : {})
+      ...(gstInAmount ? { warning: `GST of ₹${round2(inv.gst_amount)} included in the bill amount: Zoho Books holds the vendor as not GST-registered, so it does not allow GST on its bills. Check the vendor's GSTIN.` } : {})
     };
   }, { resync: false });
 
@@ -351,6 +367,8 @@ async function syncPayment(clientId, { paymentId, invoiceId }, ctx = {}) {
 /** Everything still to send for the company: approved/paid invoices with their vendors and payments. */
 async function syncAll(clientId) {
   const row = await connectionFor(clientId);
+  // A manual run relearns which fields the organisation refuses (its settings may have changed, e.g. GST switched on).
+  if ((row.config?.unsupported_fields || []).length) await row.update({ config: { ...row.config, unsupported_fields: [] } });
   const cache = {};
   const out = { synced: 0, failed: [] };
   const run = async (label, fn) => {
