@@ -63,7 +63,27 @@ async function connectionFor(clientId, { forSending = true } = {}) {
   return row;
 }
 
+/**
+ * A Zoho Books request. Fields the organisation does not accept ("Invalid Element place_of_contact")
+ * are dropped and the request retried; they are remembered on the connection so later requests leave
+ * them out from the start.
+ */
 async function zoho(row, method, path, body) {
+  if (!body) return zohoOnce(row, method, path, body);
+  for (let attempt = 0; ; attempt += 1) {
+    const skip = new Set(row.config?.unsupported_fields || []);
+    const strip = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => !skip.has(k)));
+    const clean = { ...strip(body), ...(Array.isArray(body.line_items) ? { line_items: body.line_items.map(strip) } : {}) };
+    try {
+      return await zohoOnce(row, method, path, clean);
+    } catch (e) {
+      if (e.code !== 'ZOHO_INVALID_ELEMENT' || !e.field || skip.has(e.field) || attempt >= 4) throw e;
+      await row.update({ config: { ...(row.config || {}), unsupported_fields: [...skip, e.field] } });
+    }
+  }
+}
+
+async function zohoOnce(row, method, path, body) {
   const cfg = row.config || {};
   const token = await accessTokenFor(row);
   const sep = path.includes('?') ? '&' : '?';
@@ -80,6 +100,8 @@ async function zoho(row, method, path, body) {
     if (/account is disabled|do not have access/i.test(msg)) {
       throw new IntegrationError(`Your Zoho login has no access to the organisation "${cfg.organization_name || cfg.organization_id}" (Zoho: ${msg}). Choose another organisation, or ask that organisation's Zoho admin to approve your access.`, 403, 'ZOHO_ORG_ACCESS');
     }
+    const invalid = msg.match(/Invalid Element\s+([A-Za-z_]+)/i);
+    if (invalid) throw Object.assign(new IntegrationError(`Zoho Books does not accept the field ${invalid[1]} for this organisation.`, 422, 'ZOHO_INVALID_ELEMENT'), { field: invalid[1] });
     if (/gst_no/i.test(msg)) throw new IntegrationError(`Zoho Books rejected the vendor's GSTIN as invalid. Correct the GSTIN in Vendor Master, then sync again. (Zoho: ${msg})`, 422, 'ZOHO_BAD_GSTIN');
     throw new IntegrationError(`Zoho Books: ${msg}`, 502, 'PROVIDER_ERROR');
   }
@@ -134,6 +156,8 @@ function bankFor(row, lk) {
   return bank.account_id;
 }
 
+const NO_GSTIN = 'Sent without GSTIN';
+
 // ── Links ────────────────────────────────────────────────────────────────────
 const linkOf = (clientId, entity, localId) => M().IntegrationLink.findOne({ where: { client_id: clientId, provider: PROVIDER, entity_type: entity, local_id: localId } });
 
@@ -146,7 +170,8 @@ async function track(clientId, entity, localId, fn, { resync = false } = {}) {
   if (link.status === 'SYNCED' && link.external_id && !resync) return link;
   try {
     const out = await fn(link);
-    await link.update({ external_id: String(out.id), external_ref: out.ref ? String(out.ref).slice(0, 150) : null, status: 'SYNCED', last_error: null, synced_at: new Date() });
+    // out.warning: sent, but not exactly as in LedgerLine (shown on the sync card).
+    await link.update({ external_id: String(out.id), external_ref: out.ref ? String(out.ref).slice(0, 150) : null, status: 'SYNCED', last_error: out.warning ? String(out.warning).slice(0, 500) : null, synced_at: new Date() });
   } catch (e) {
     await link.update({ status: 'FAILED', last_error: String(e.message || e).slice(0, 500) });
     throw e;
@@ -160,6 +185,12 @@ async function syncVendor(clientId, vendorId, ctx = {}) {
   const v = await M().Vendor.findByPk(vendorId);
   if (!v) throw new IntegrationError('Vendor not found', 404, 'NOT_FOUND');
   const existing = await linkOf(clientId, 'VENDOR', v.id);
+  // Once per sync run: a vendor sent without its GSTIN is retried at most once per run.
+  if (ctx.cache) {
+    ctx.cache.vendorsDone = ctx.cache.vendorsDone || new Set();
+    if (ctx.cache.vendorsDone.has(v.id) && existing?.status === 'SYNCED') return existing;
+    ctx.cache.vendorsDone.add(v.id);
+  }
   return track(clientId, 'VENDOR', v.id, async () => {
     const gstin = String(v.gst_number || '').trim().toUpperCase();
     const body = {
@@ -172,11 +203,18 @@ async function syncVendor(clientId, vendorId, ctx = {}) {
       ...(v.email || v.phone ? { contact_persons: [{ first_name: v.contact_person || v.vendor_name, email: v.email || undefined, phone: v.phone || undefined, is_primary_contact: true }] } : {}),
       notes: [v.vendor_code && `LedgerLine vendor ${v.vendor_code}`, v.pan_number && `PAN ${v.pan_number}`].filter(Boolean).join(' · ') || undefined
     };
-    const res = existing?.external_id
-      ? await zoho(row, 'PUT', `/contacts/${existing.external_id}`, body)
-      : await zoho(row, 'POST', '/contacts', body);
-    return { id: res.contact.contact_id, ref: v.vendor_name };
-  }, { resync: Boolean(ctx.resync) });
+    const send = (b) => (existing?.external_id ? zoho(row, 'PUT', `/contacts/${existing.external_id}`, b) : zoho(row, 'POST', '/contacts', b));
+    try {
+      const res = await send(body);
+      return { id: res.contact.contact_id, ref: v.vendor_name };
+    } catch (e) {
+      if (e.code !== 'ZOHO_BAD_GSTIN') throw e;
+      // Zoho validates the GSTIN; send the vendor without it rather than holding back its bills.
+      const { gst_no: _g, place_of_contact: _p, ...rest } = body;
+      const res = await send({ ...rest, gst_treatment: 'business_none' });
+      return { id: res.contact.contact_id, ref: v.vendor_name, warning: `${NO_GSTIN}: Zoho Books rejected GSTIN ${gstin}. Correct it in Vendor Master, then use Sync now to update the vendor.` };
+    }
+  }, { resync: Boolean(ctx.resync) || String(existing?.last_error || '').startsWith(NO_GSTIN) }); // retried until Zoho takes the GSTIN
 }
 
 /** The bill, plus the PO advance and any returns / cash discount applied to it. */
@@ -189,13 +227,14 @@ async function syncBill(clientId, invoiceId, ctx = {}) {
     throw new IntegrationError(`Invoice ${inv.invoice_number} is ${inv.status === 'REJECTED' ? 'rejected' : 'on a 3-way match exception'} — only approved invoices go to Zoho Books.`, 409, 'NOT_READY');
   }
   const vendor = await M().Vendor.findByPk(inv.vendor_id);
-  const vendorLink = await syncVendor(clientId, inv.vendor_id, { row });
+  const vendorLink = await syncVendor(clientId, inv.vendor_id, { row, cache: ctx.cache });
   const po = inv.po_id ? await M().PurchaseOrder.findByPk(inv.po_id) : null;
   const { receiptAccountsFor } = require('../apJournal.service');
   const costCode = receiptAccountsFor(po, inv.ses_id ? 'SERVICE' : 'GOODS').debit.code;
 
   const billLink = await track(clientId, 'BILL', inv.id, async () => {
-    const gstin = String(vendor?.gst_number || '').trim().toUpperCase();
+    // A vendor Zoho took without its GSTIN gets bills as not GST-registered too.
+    const gstin = String(vendorLink.last_error || '').startsWith(NO_GSTIN) ? '' : String(vendor?.gst_number || '').trim().toUpperCase();
     const taxId = gstTaxFor(inv, lk);
     const res = await zoho(row, 'POST', '/bills', {
       vendor_id: vendorLink.external_id,
@@ -323,6 +362,7 @@ async function status(clientId) {
   return {
     counts: ['VENDOR', 'BILL', 'ADVANCE', 'PAYMENT', 'SETTLEMENT', 'CREDIT', 'DISCOUNT', 'DISCOUNT_SETTLEMENT'].map((t) => ({ type: t, synced: count(t, 'SYNCED'), failed: count(t, 'FAILED') })),
     failures: links.filter((l) => l.status === 'FAILED').slice(0, 20).map((l) => ({ type: l.entity_type, local_id: l.local_id, error: l.last_error, at: l.updated_at })),
+    warnings: links.filter((l) => l.status === 'SYNCED' && l.last_error).slice(0, 20).map((l) => ({ type: l.entity_type, local_id: l.local_id, name: l.external_ref, warning: l.last_error })),
     last_synced_at: links.find((l) => l.synced_at)?.synced_at || null
   };
 }

@@ -193,6 +193,20 @@ const ZohoBooksSync = ({ onDisconnect, disconnecting }) => {
               ]}
             />
           )}
+          {status.warnings?.length > 0 && (
+            <Table
+              size="small"
+              rowKey={(r) => `${r.type}-${r.local_id}`}
+              pagination={false}
+              style={{ marginBottom: 16 }}
+              title={() => <Text strong>Sent with a note</Text>}
+              dataSource={status.warnings}
+              columns={[
+                { title: 'Record', key: 'r', width: 220, render: (_, r) => `${LABEL[r.type] || r.type}${r.name ? ` · ${r.name}` : ` #${r.local_id}`}` },
+                { title: 'Note', dataIndex: 'warning', key: 'w' },
+              ]}
+            />
+          )}
           <Text strong>Account mapping</Text>
           <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>Which Zoho Books account each bill line posts to. Picked by name to start with; change any of them here.</Text>
           {(map?.accounts || []).length === 0 && <Empty description="No accounts came back from Zoho Books" />}
