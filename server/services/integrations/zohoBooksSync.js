@@ -134,12 +134,13 @@ function accountFor(code, row, lk) {
 }
 
 /** GST on a bill line: IGST tax when the invoice is inter-state, else the CGST+SGST group at that rate. */
-function gstTaxFor(inv, lk) {
+/** kind: 'igst' or 'group' forces the GST type (Zoho decides intra/inter-state from the two states). */
+function gstTaxFor(inv, lk, kind) {
   const base = Number(inv.base_amount || 0), gst = Number(inv.gst_amount || 0);
   if (!(gst > 0) || !(base > 0)) return null;
   const rate = Math.round((gst / base) * 1000) / 10;
   const close = (p) => Math.abs(Number(p) - rate) < 0.06;
-  if (Number(inv.igst_amount || 0) > 0) {
+  if (kind === 'igst' || (!kind && Number(inv.igst_amount || 0) > 0)) {
     const igst = lk.taxes.find((t) => String(t.tax_specific_type || '').toLowerCase() === 'igst' && close(t.tax_percentage));
     if (igst) return igst.tax_id;
   }
@@ -242,8 +243,8 @@ async function syncBill(clientId, invoiceId, ctx = {}) {
   const billLink = await track(clientId, 'BILL', inv.id, async () => {
     // A vendor Zoho took without its GSTIN gets bills as not GST-registered too.
     const gstin = String(vendorLink.last_error || '').startsWith(NO_GSTIN) ? '' : String(vendor?.gst_number || '').trim().toUpperCase();
-    const send = (gstInAmount) => {
-      const taxId = gstInAmount ? null : gstTaxFor(inv, lk);
+    const send = (gstInAmount, kind) => {
+      const taxId = gstInAmount ? null : gstTaxFor(inv, lk, kind);
       return zoho(row, 'POST', '/bills', {
         vendor_id: vendorLink.external_id,
         bill_number: inv.invoice_number,
@@ -267,18 +268,25 @@ async function syncBill(clientId, invoiceId, ctx = {}) {
     // the bill total still matches LedgerLine and the payments settle it. Also used when Zoho holds the
     // vendor as unregistered and refuses GST on the bill (reverse charge).
     let gstInAmount = !gstin && Number(inv.gst_amount || 0) > 0;
+    let kind;
+    let note = null;
     let res;
-    try {
-      res = await send(gstInAmount);
-    } catch (e) {
-      if (gstInAmount || !/reverse charge/i.test(e.message) || !(Number(inv.gst_amount || 0) > 0)) throw e;
-      gstInAmount = true;
-      res = await send(true);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        res = await send(gstInAmount, kind);
+        break;
+      } catch (e) {
+        const hasGst = Number(inv.gst_amount || 0) > 0;
+        if (attempt >= 2 || !hasGst || gstInAmount) throw e;
+        if (/reverse charge/i.test(e.message)) { gstInAmount = true; continue; }
+        // Zoho decides intra- vs inter-state from the two states; follow it (same amount, other GST type).
+        if (!kind && /IGST cannot be applied|intra-?state/i.test(e.message)) { kind = 'group'; note = 'GST sent as CGST + SGST: Zoho Books treats this as an intrastate purchase (LedgerLine had IGST).'; continue; }
+        if (!kind && /(CGST|SGST).*cannot be applied|inter-?state/i.test(e.message)) { kind = 'igst'; note = 'GST sent as IGST: Zoho Books treats this as an interstate purchase (LedgerLine had CGST + SGST).'; continue; }
+        throw e;
+      }
     }
-    return {
-      id: res.bill.bill_id, ref: res.bill.bill_number,
-      ...(gstInAmount ? { warning: `GST of ₹${round2(inv.gst_amount)} included in the bill amount: Zoho Books holds the vendor as not GST-registered, so it does not allow GST on its bills. Check the vendor's GSTIN.` } : {})
-    };
+    if (gstInAmount) note = `GST of ₹${round2(inv.gst_amount)} included in the bill amount: Zoho Books holds the vendor as not GST-registered, so it does not allow GST on its bills. Check the vendor's GSTIN.`;
+    return { id: res.bill.bill_id, ref: res.bill.bill_number, ...(note ? { warning: note } : {}) };
   }, { resync: false });
 
   // Advance paid on the PO: a vendor payment applied to this bill.
