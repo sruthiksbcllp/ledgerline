@@ -74,6 +74,26 @@ const ZohoBooksSync = () => {
   };
 
   const shown = (status?.counts || []).filter((c) => c.synced || c.failed);
+  const confirmed = Boolean(map?.organization_confirmed);
+  const [pickedOrg, setPickedOrg] = useState(null);
+  const [refreshingOrgs, setRefreshingOrgs] = useState(false);
+
+  // Re-reads the organisations of the connected Zoho login (e.g. after creating one in Zoho Books).
+  const refreshOrgs = async () => {
+    setRefreshingOrgs(true);
+    try {
+      await api.post('/integrations/connections/zoho_books/test', {}, { timeout: 60000 });
+    } catch (e) {
+      message.error(e?.response?.data?.message || 'Could not read your Zoho Books organisations');
+    } finally {
+      setRefreshingOrgs(false);
+      load();
+    }
+  };
+  const confirmOrg = async () => {
+    await save({ organization_id: pickedOrg || map.organization_id });
+    load();
+  };
 
   return (
     <Card
@@ -82,13 +102,39 @@ const ZohoBooksSync = () => {
       extra={(
         <Space>
           <Button icon={<RefreshCcw size={14} />} onClick={load} loading={loading}>Refresh</Button>
-          <Button type="primary" icon={<Send size={14} />} onClick={syncNow} loading={syncing} disabled={!!error}>Sync now</Button>
+          <Button type="primary" icon={<Send size={14} />} onClick={syncNow} loading={syncing} disabled={!!error || !confirmed}>Sync now</Button>
         </Space>
       )}
     >
       {loading && !status && <div style={{ textAlign: 'center', padding: 16 }}><Spin /></div>}
       {error && <Alert type="error" showIcon message={error} />}
-      {status && draft && (
+      {status && draft && !confirmed && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Choose the Zoho Books organisation LedgerLine should send to"
+          description={(
+            <div>
+              <div style={{ marginBottom: 8 }}>Nothing is sent until you confirm. Your Zoho login has {(map?.organizations || []).length} organisation(s):</div>
+              <Space wrap>
+                <Select
+                  style={{ width: 360, maxWidth: '100%' }}
+                  value={pickedOrg || map?.organization_id}
+                  options={(map?.organizations || []).map((o) => ({ value: o.id, label: o.name }))}
+                  onChange={setPickedOrg}
+                />
+                <Button type="primary" loading={saving} onClick={confirmOrg}>Use this organisation</Button>
+                <Button loading={refreshingOrgs} onClick={refreshOrgs}>Refresh organisations</Button>
+              </Space>
+              <div style={{ marginTop: 8, fontSize: 12 }}>
+                Not in the list? It must belong to the Zoho login you connected with. Create it in that login and click Refresh organisations, or Disconnect Zoho Books and connect again with the right login.
+              </div>
+            </div>
+          )}
+        />
+      )}
+      {status && draft && confirmed && (
         <>
           {(map?.organizations || []).length > 1 && (
             <div style={{ marginBottom: 12 }}>

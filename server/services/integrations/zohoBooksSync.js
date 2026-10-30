@@ -46,12 +46,20 @@ const ACCOUNT_HINTS = {
 };
 
 // ── Connection and requests ──────────────────────────────────────────────────
-async function connectionFor(clientId) {
+/**
+ * The company's Zoho Books connection. Sending needs the admin to have confirmed the organisation:
+ * a Zoho login can belong to several (live books, a test one, organisations it cannot use), so the
+ * default one is never written to without a choice.
+ */
+async function connectionFor(clientId, { forSending = true } = {}) {
   if (!isLive()) throw new IntegrationError('Integrations are not activated on this server (INTEGRATIONS_LIVE).', 503, 'NOT_ACTIVATED');
   const row = await M().IntegrationConnection.findOne({ where: { client_id: clientId, provider: PROVIDER } });
   if (!row || !['CONNECTED', 'ERROR'].includes(row.status)) throw new IntegrationError('Zoho Books is not connected for this company.', 409, 'NOT_CONNECTED');
   const cfg = row.config || {};
-  if (!cfg.api_domain || !cfg.organization_id) throw new IntegrationError('Zoho Books organisation is not known yet. Run Test on the Zoho Books card.', 409, 'RECONNECT');
+  if (!cfg.api_domain || !cfg.organization_id) throw new IntegrationError('Zoho Books organisation is not known yet. Click Test on the Zoho Books card.', 409, 'RECONNECT');
+  if (forSending && !cfg.organization_confirmed) {
+    throw new IntegrationError('Choose which Zoho Books organisation to send to first (Zoho Books sync → Use this organisation).', 409, 'CHOOSE_ORG');
+  }
   return row;
 }
 
@@ -68,7 +76,12 @@ async function zoho(row, method, path, body) {
   if (res.status === 429) throw new IntegrationError('Zoho Books rate limit reached (100 requests a minute). Try again shortly.', 429, 'RATE_LIMIT');
   if (res.status === 401) throw new IntegrationError('Zoho rejected the access token. Connect again.', 409, 'RECONNECT');
   if (!res.body || res.body.code !== 0) {
-    throw new IntegrationError(`Zoho Books: ${res.body?.message || `request failed (${res.status})`}`, 502, 'PROVIDER_ERROR');
+    const msg = String(res.body?.message || `request failed (${res.status})`);
+    if (/account is disabled|do not have access/i.test(msg)) {
+      throw new IntegrationError(`Your Zoho login has no access to the organisation "${cfg.organization_name || cfg.organization_id}" (Zoho: ${msg}). Choose another organisation, or ask that organisation's Zoho admin to approve your access.`, 403, 'ZOHO_ORG_ACCESS');
+    }
+    if (/gst_no/i.test(msg)) throw new IntegrationError(`Zoho Books rejected the vendor's GSTIN as invalid. Correct the GSTIN in Vendor Master, then sync again. (Zoho: ${msg})`, 422, 'ZOHO_BAD_GSTIN');
+    throw new IntegrationError(`Zoho Books: ${msg}`, 502, 'PROVIDER_ERROR');
   }
   return res.body;
 }
@@ -316,11 +329,12 @@ async function status(clientId) {
 
 /** Accounts and bank accounts for the mapping selects, with what is chosen now. */
 async function mapping(clientId) {
-  const row = await connectionFor(clientId);
+  const row = await connectionFor(clientId, { forSending: false });
   const lk = await lookups(row);
   const auto = (code) => { try { return accountFor(code, { config: {} }, lk); } catch { return null; } };
   return {
     organization_id: row.config?.organization_id || null,
+    organization_confirmed: Boolean(row.config?.organization_confirmed),
     organizations: row.config?.organizations || [],
     auto_sync: row.config?.auto_sync !== false,
     account_map: Object.fromEntries(Object.keys(ACCOUNT_HINTS).map((c) => [c, (row.config?.account_map || {})[c] || auto(Number(c))])),
@@ -331,7 +345,7 @@ async function mapping(clientId) {
 }
 
 async function saveSettings(clientId, { auto_sync, account_map, bank_account_id, organization_id }) {
-  const row = await connectionFor(clientId);
+  const row = await connectionFor(clientId, { forSending: false });
   const cfg = { ...(row.config || {}) };
   // Another organisation of the same Zoho login: its accounts and bank differ, so the mapping resets.
   if (organization_id && String(organization_id) !== String(cfg.organization_id)) {
@@ -339,9 +353,15 @@ async function saveSettings(clientId, { auto_sync, account_map, bank_account_id,
     if (!org) throw new IntegrationError('That organisation is not in your Zoho Books login.', 400, 'BAD_ORG');
     const synced = await M().IntegrationLink.count({ where: { client_id: clientId, provider: PROVIDER, status: 'SYNCED' } });
     if (synced) throw new IntegrationError('Records were already sent to the current organisation. Disconnect and connect again to use another one.', 409, 'ORG_IN_USE');
-    Object.assign(cfg, { organization_id: org.id, organization_name: org.name, account_map: {}, bank_account_id: null });
+    Object.assign(cfg, { organization_id: org.id, organization_name: org.name, organization_confirmed: true, account_map: {}, bank_account_id: null });
     await row.update({ config: cfg, account_label: org.name });
+    await M().IntegrationLink.destroy({ where: { client_id: clientId, provider: PROVIDER, status: ['FAILED', 'PENDING'] } }); // errors were from the other organisation
     return cfg;
+  }
+  // Confirming the organisation already selected.
+  if (organization_id && !cfg.organization_confirmed) {
+    cfg.organization_confirmed = true;
+    await M().IntegrationLink.destroy({ where: { client_id: clientId, provider: PROVIDER, status: ['FAILED', 'PENDING'] } });
   }
   if (auto_sync !== undefined) cfg.auto_sync = Boolean(auto_sync);
   if (account_map) cfg.account_map = Object.fromEntries(Object.entries(account_map).filter(([k, v]) => ACCOUNT_HINTS[k] && v).map(([k, v]) => [k, String(v)]));
@@ -354,7 +374,7 @@ async function saveSettings(clientId, { auto_sync, account_map, bank_account_id,
 async function autoEnabled(clientId) {
   if (!isLive() || !clientId) return false;
   const row = await M().IntegrationConnection.findOne({ where: { client_id: clientId, provider: PROVIDER } });
-  return Boolean(row && row.status === 'CONNECTED' && row.config?.auto_sync !== false && row.config?.organization_id);
+  return Boolean(row && row.status === 'CONNECTED' && row.config?.auto_sync !== false && row.config?.organization_id && row.config?.organization_confirmed);
 }
 function later(label, clientId, fn, options) {
   const run = () => setTimeout(async () => {
