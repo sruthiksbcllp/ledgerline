@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, Col, Empty, Row, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
-import { RefreshCcw, Send } from 'lucide-react';
+import { Alert, Button, Card, Col, Empty, Popconfirm, Row, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
+import { RefreshCcw, Send, Unplug } from 'lucide-react';
 import api from '../../utils/api';
 
 /**
@@ -22,7 +22,7 @@ const ACCOUNTS = [
   ['4100', 'Discount received (cash discounts)']
 ];
 
-const ZohoBooksSync = () => {
+const ZohoBooksSync = ({ onDisconnect, disconnecting }) => {
   const [status, setStatus] = useState(null);
   const [map, setMap] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -103,6 +103,16 @@ const ZohoBooksSync = () => {
         <Space>
           <Button icon={<RefreshCcw size={14} />} onClick={load} loading={loading}>Refresh</Button>
           <Button type="primary" icon={<Send size={14} />} onClick={syncNow} loading={syncing} disabled={!!error || !confirmed}>Sync now</Button>
+          {onDisconnect && (
+            <Popconfirm
+              title="Disconnect Zoho Books?"
+              description="LedgerLine stops sending to Zoho Books. Records already sent stay in Zoho Books."
+              okText="Disconnect" okButtonProps={{ danger: true }}
+              onConfirm={onDisconnect}
+            >
+              <Button danger icon={<Unplug size={14} />} loading={disconnecting}>Disconnect</Button>
+            </Popconfirm>
+          )}
         </Space>
       )}
     >

@@ -321,7 +321,7 @@ const IntegrationsPanel = () => {
           description="Connect options are shown for every app LedgerLine will support. Connections will be switched on once the integrations are activated; nothing is sent to these apps yet." />
       )}
       {live && !hasCompany && <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="Select a company to connect its apps. Integrations are set up per company." />}
-      {live && ['CONNECTED', 'ERROR'].includes(items.find((i) => i.key === 'zoho_books')?.connection?.status) && <ZohoBooksSync />}
+      {live && ['CONNECTED', 'ERROR'].includes(items.find((i) => i.key === 'zoho_books')?.connection?.status) && <ZohoBooksSync disconnecting={busy['zoho_books'] === 'disconnect'} onDisconnect={() => disconnect(items.find((i) => i.key === 'zoho_books'))} />}
       {/* One dropdown per category; collapsed until clicked. */}
       <Collapse
         style={{ marginBottom: 16, background: 'transparent' }}
