@@ -38,7 +38,8 @@ const zohoMode = (mode) => ({ Cash: 'Cash', Cheque: 'Check' }[mode] || (mode ? '
 
 // Default Zoho account per LedgerLine cost account, by name, when settings do not pick one.
 const ACCOUNT_HINTS = {
-  1200: { types: ['stock', 'inventory', 'other_current_asset'], words: ['inventory', 'stock'] },
+  // Zoho only takes its own inventory items on stock accounts, so goods for stock post to a cost account.
+  1200: { types: ['cost_of_goods_sold', 'expense'], words: ['cost of goods', 'raw material', 'merchandise', 'purchase'] },
   1500: { types: ['fixed_asset'], words: ['furniture', 'equipment', 'asset', 'capital'] },
   6350: { types: ['expense', 'other_expense', 'cost_of_goods_sold'], words: ['contract', 'consult', 'professional', 'service', 'outsourc'] },
   6800: { types: ['expense', 'other_expense', 'cost_of_goods_sold'], words: ['office supplies', 'consumable', 'office expense', 'supplies'] },
@@ -122,7 +123,8 @@ async function lookups(row, cache = {}) {
 
 function accountFor(code, row, lk) {
   const chosen = (row.config?.account_map || {})[code];
-  if (chosen) return chosen;
+  const chosenType = String(lk.accounts.find((a) => String(a.account_id) === String(chosen))?.account_type || '').toLowerCase();
+  if (chosen && chosenType !== 'stock') return chosen; // a stock account needs Zoho items; pick a cost account instead
   const hint = ACCOUNT_HINTS[code] || ACCOUNT_HINTS[6800];
   const pool = lk.accounts.filter((a) => hint.types.includes(String(a.account_type || '').toLowerCase()) && a.is_active !== false);
   const named = pool.find((a) => hint.words.some((w) => String(a.account_name || '').toLowerCase().includes(w)));
@@ -235,7 +237,10 @@ async function syncBill(clientId, invoiceId, ctx = {}) {
   const billLink = await track(clientId, 'BILL', inv.id, async () => {
     // A vendor Zoho took without its GSTIN gets bills as not GST-registered too.
     const gstin = String(vendorLink.last_error || '').startsWith(NO_GSTIN) ? '' : String(vendor?.gst_number || '').trim().toUpperCase();
-    const taxId = gstTaxFor(inv, lk);
+    // An unregistered vendor (no valid GSTIN) cannot charge GST in Zoho: the GST goes into the amount, so
+    // the bill total still matches LedgerLine and the payments settle it.
+    const gstInAmount = !gstin && Number(inv.gst_amount || 0) > 0;
+    const taxId = gstInAmount ? null : gstTaxFor(inv, lk);
     const res = await zoho(row, 'POST', '/bills', {
       vendor_id: vendorLink.external_id,
       bill_number: inv.invoice_number,
@@ -248,13 +253,16 @@ async function syncBill(clientId, invoiceId, ctx = {}) {
       line_items: [{
         account_id: accountFor(costCode, row, lk),
         description: `${inv.ses_id ? 'Services' : 'Goods'} per ${po?.po_number || 'invoice'} ${inv.invoice_number}`.slice(0, 2000),
-        rate: round2(inv.base_amount || Number(inv.total_amount || 0) - Number(inv.gst_amount || 0)),
+        rate: gstInAmount ? round2(inv.total_amount) : round2(inv.base_amount || Number(inv.total_amount || 0) - Number(inv.gst_amount || 0)),
         quantity: 1,
         ...(taxId ? { tax_id: taxId } : {}),
         ...(inv.hsn_sac_code ? { hsn_or_sac: inv.hsn_sac_code } : {})
       }]
     });
-    return { id: res.bill.bill_id, ref: res.bill.bill_number };
+    return {
+      id: res.bill.bill_id, ref: res.bill.bill_number,
+      ...(gstInAmount ? { warning: `GST of ₹${round2(inv.gst_amount)} included in the bill amount: the vendor has no GSTIN that Zoho Books accepts, so Zoho does not allow GST on its bills.` } : {})
+    };
   }, { resync: false });
 
   // Advance paid on the PO: a vendor payment applied to this bill.
@@ -278,10 +286,12 @@ async function syncBill(clientId, invoiceId, ctx = {}) {
     const applies = Number(r.total_amount) <= open + 0.009;
     if (applies) open = round2(open - Number(r.total_amount));
     await track(clientId, 'CREDIT', r.id, async () => {
-      const taxId = Number(r.gst_amount) > 0 ? gstTaxFor(inv, lk) : null;
+      const unregistered = String(vendorLink.last_error || '').startsWith(NO_GSTIN) || !String(vendor?.gst_number || '').trim();
+      const gstInAmount = unregistered && Number(r.gst_amount) > 0; // as on the bill: GST inside the amount
+      const taxId = Number(r.gst_amount) > 0 && !gstInAmount ? gstTaxFor(inv, lk) : null;
       const res = await zoho(row, 'POST', applies ? `/vendorcredits?bill_id=${encodeURIComponent(billLink.external_id)}` : '/vendorcredits', {
         vendor_id: vendorLink.external_id, vendor_credit_number: r.return_number, date: day(r.return_date), reference_number: r.credit_note_number || inv.invoice_number,
-        line_items: [{ account_id: accountFor(costCode, row, lk), description: `Returned: ${r.reason}`.slice(0, 2000), rate: round2(r.total_value), quantity: 1, ...(taxId ? { tax_id: taxId } : {}) }]
+        line_items: [{ account_id: accountFor(costCode, row, lk), description: `Returned: ${r.reason}`.slice(0, 2000), rate: gstInAmount ? round2(r.total_amount) : round2(r.total_value), quantity: 1, ...(taxId ? { tax_id: taxId } : {}) }]
       });
       return { id: res.vendor_credit.vendor_credit_id, ref: r.return_number };
     });
