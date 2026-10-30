@@ -20,6 +20,7 @@ const EVENTS = {
   PAYMENT: { label: 'Payment', color: 'green' },
   ADVANCE: { label: 'Advance to vendor', color: 'gold' },
   PURCHASE_RETURN: { label: 'Purchase return', color: 'magenta' },
+  TDS_DEPOSIT: { label: 'TDS deposit', color: 'geekblue' },
   REVERSAL: { label: 'Reversal', color: 'volcano' },
 };
 
@@ -61,31 +62,44 @@ export const JournalEntries = ({ module, id, refreshKey, emptyText }) => {
         <Text type="secondary">({entries.length})</Text>
       </Space>
       {entries.length === 0 && <div><Text type="secondary">{emptyText || 'No journal entry posted yet.'}</Text></div>}
-      {entries.map((je) => (
-        <div key={je.id} style={{ marginBottom: 16 }}>
-          <Space size={8} wrap style={{ marginBottom: 6 }}>
-            <Text strong>{je.je_number}</Text>
-            <Tag color={EVENTS[je.event_type]?.color} style={{ marginInlineEnd: 0 }}>{EVENTS[je.event_type]?.label || je.event_type}</Tag>
-            <Text type="secondary">{je.entry_date ? new Date(je.entry_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</Text>
-            {je.status === 'REVERSED' && <Tag style={{ marginInlineEnd: 0 }}>Reversed</Tag>}
-          </Space>
-          <Table
-            rowKey="id"
-            size="small"
-            pagination={false}
-            tableLayout="fixed"
-            columns={columns}
-            dataSource={je.lines || []}
-            summary={() => (
-              <Table.Summary.Row>
-                <Table.Summary.Cell index={0}><Text strong>Total</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={1} align="right"><Text strong>{amount(je.total_debit)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={2} align="right"><Text strong>{amount(je.total_credit)}</Text></Table.Summary.Cell>
-              </Table.Summary.Row>
-            )}
-          />
-        </div>
-      ))}
+      {entries.map((je) => <JournalEntryBlock key={je.id} je={je} />)}
+    </div>
+  );
+};
+
+/**
+ * One journal entry: number, event, date, then Dr / Cr lines with totals. Takes a posted entry
+ * (with lines), or a preview: { je_number: 'On save', event_type, lines: [{ account_code, account_name, debit, credit }] }.
+ * extra: anything shown after the date (e.g. challan number, who posted it).
+ */
+export const JournalEntryBlock = ({ je, extra }) => {
+  const lines = (je.lines || []).map((l, i) => ({ id: l.id || i, ...l }));
+  const totalDebit = je.total_debit ?? lines.reduce((s, l) => s + Number(l.debit || 0), 0);
+  const totalCredit = je.total_credit ?? lines.reduce((s, l) => s + Number(l.credit || 0), 0);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <Space size={8} wrap style={{ marginBottom: 6 }}>
+        <Text strong>{je.je_number}</Text>
+        <Tag color={EVENTS[je.event_type]?.color} style={{ marginInlineEnd: 0 }}>{EVENTS[je.event_type]?.label || je.event_type}</Tag>
+        {je.entry_date && <Text type="secondary">{new Date(je.entry_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</Text>}
+        {je.status === 'REVERSED' && <Tag style={{ marginInlineEnd: 0 }}>Reversed</Tag>}
+        {extra}
+      </Space>
+      <Table
+        rowKey="id"
+        size="small"
+        pagination={false}
+        tableLayout="fixed"
+        columns={columns}
+        dataSource={lines}
+        summary={() => (
+          <Table.Summary.Row>
+            <Table.Summary.Cell index={0}><Text strong>Total</Text></Table.Summary.Cell>
+            <Table.Summary.Cell index={1} align="right"><Text strong>{amount(totalDebit)}</Text></Table.Summary.Cell>
+            <Table.Summary.Cell index={2} align="right"><Text strong>{amount(totalCredit)}</Text></Table.Summary.Cell>
+          </Table.Summary.Row>
+        )}
+      />
     </div>
   );
 };

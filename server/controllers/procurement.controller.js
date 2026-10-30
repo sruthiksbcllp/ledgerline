@@ -1677,7 +1677,18 @@ exports.markInvoicePaid = async (req, res, next) => {
       return success(res, invoice, 'Invoice is already marked as paid');
     }
 
-    await invoice.update({ status: 'PAID' });
+    // Cash discount the vendor accepts at payment: settles that part of the balance without cash
+    // (posted as Cr Discount received). The rest is paid from the bank.
+    const { balanceOf, netPayableOf } = require('../services/apJournal.service');
+    const discount = Math.round(Number(req.body?.discount_amount || 0) * 100) / 100;
+    if (discount < 0) return error(res, 'The cash discount cannot be negative', 400);
+    if (discount > balanceOf(invoice) + 0.009) return error(res, `Cash discount cannot be more than the balance due of ${balanceOf(invoice)}`, 400);
+    const discountTotal = Math.round((Number(invoice.discount_received || 0) + discount) * 100) / 100;
+    await invoice.update({
+      status: 'PAID',
+      discount_received: discountTotal,
+      paid_amount: Math.max(Number(invoice.paid_amount || 0), Math.round((netPayableOf(invoice) - discountTotal) * 100) / 100)
+    });
     logActivity({
       module: "PROCUREMENT",
       action: "INVOICE_MARKED_PAID",

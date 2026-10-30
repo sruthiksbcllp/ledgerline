@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Button, Card, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Row, Segmented,
+  Alert, Button, Card, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Segmented,
   Select, Space, Table, Tag, Typography, message,
 } from 'antd';
 import { CheckCircle2, FilePlus2, PenLine, ReceiptIndianRupee, RefreshCcw, Sparkles, Trash2, XCircle } from 'lucide-react';
@@ -11,7 +11,7 @@ import { ChecksPanel, DocumentDropzone, StatusTag } from '../components/finance/
 import { checkUploadFile, markProps } from '../utils/documentReview';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import InvoiceDocument from '../components/procurement/InvoiceDocument';
-import { JournalEntries } from '../components/finance/JournalEntries';
+import { JournalEntries, JournalEntryBlock } from '../components/finance/JournalEntries';
 
 const { Text } = Typography;
 
@@ -258,8 +258,10 @@ const ApInvoiceAutomation = () => {
   };
   const pay = async () => {
     const v = await payForm.validateFields();
+    const { has_discount: hasDiscount, ...rest } = v;
     const ok = await act(() => api.post(`/procurement/ap-invoices/${detail.id}/payments`, {
-      ...v, payment_date: v.payment_date ? v.payment_date.format('YYYY-MM-DD') : undefined,
+      ...rest, discount_amount: hasDiscount ? Number(v.discount_amount || 0) : 0,
+      payment_date: v.payment_date ? v.payment_date.format('YYYY-MM-DD') : undefined,
     }), 'Payment recorded');
     if (ok) setPayOpen(false);
   };
@@ -485,7 +487,7 @@ const ApInvoiceAutomation = () => {
               <Button danger icon={<XCircle size={15} />} onClick={() => { rejectForm.resetFields(); setRejectOpen(true); }}>Reject</Button>
             )}
             {['APPROVED_FOR_PAYMENT', 'PARTIAL'].includes(detail.status) && (
-              <Button type="primary" onClick={() => { payForm.setFieldsValue({ amount: Number(detail.balance), payment_date: dayjs() }); setPayOpen(true); }}>Record payment</Button>
+              <Button type="primary" onClick={() => { payForm.setFieldsValue({ amount: Number(detail.balance), payment_date: dayjs(), has_discount: false, discount_amount: undefined }); setPayOpen(true); }}>Record payment</Button>
             )}
           </Space>
         )}
@@ -513,6 +515,9 @@ const ApInvoiceAutomation = () => {
               {(Number(detail.tds_deducted) > 0 || Number(detail.advance_adjusted) > 0 || Number(detail.returns_credit) > 0) && (
                 <Descriptions.Item label="Net payable to vendor">{inr(detail.net_payable)}</Descriptions.Item>
               )}
+              {Number(detail.discount_received) > 0 && (
+                <Descriptions.Item label="Cash discount received">{inr(detail.discount_received)}</Descriptions.Item>
+              )}
               {Number(detail.balance) < 0
                 ? <Descriptions.Item label="Vendor owes us"><Text strong type="danger">{inr(-Number(detail.balance))}</Text> <Text type="secondary">(refund or set off on the next invoice)</Text></Descriptions.Item>
                 : <Descriptions.Item label="Balance due"><Text strong>{inr(detail.balance)}</Text></Descriptions.Item>}
@@ -538,7 +543,8 @@ const ApInvoiceAutomation = () => {
                 { title: 'Date', dataIndex: 'payment_date', render: fmt },
                 { title: 'Mode', dataIndex: 'payment_mode', render: (v) => v || '—' },
                 { title: 'Reference', dataIndex: 'reference', render: (v) => v || '—' },
-                { title: 'Amount', dataIndex: 'amount', align: 'right', render: (v) => inr(v) },
+                { title: 'Paid from bank', dataIndex: 'amount', align: 'right', render: (v) => inr(v) },
+                { title: 'Cash discount', dataIndex: 'discount_amount', align: 'right', render: (v) => (Number(v) > 0 ? inr(v) : '—') },
               ]} />
             )}
             <JournalEntries module="INVOICE" id={detail.id} refreshKey={detail} emptyText={invoiceJournalHint(detail)} />
@@ -548,8 +554,27 @@ const ApInvoiceAutomation = () => {
       </Drawer>
 
       <Modal open={payOpen} title="Record payment" onCancel={() => setPayOpen(false)} onOk={pay} confirmLoading={acting} okText="Record payment" destroyOnClose>
-        <Form form={payForm} layout="vertical">
-          <Form.Item name="amount" label={`Amount (balance ${detail ? inr(detail.balance) : ''})`} rules={[{ required: true, message: 'Enter the amount' }]}>
+        <Form form={payForm} layout="vertical"
+          onValuesChange={(changed, all) => {
+            // With a discount, the bank pays the balance less the discount (settled in full).
+            if (('discount_amount' in changed || 'has_discount' in changed) && detail) {
+              const disc = all.has_discount ? Number(all.discount_amount || 0) : 0;
+              payForm.setFieldsValue({ amount: Math.max(0, Math.round((Number(detail.balance) - disc) * 100) / 100) });
+            }
+          }}>
+          <Form.Item name="has_discount" label="Is there a cash discount?" initialValue={false}>
+            <Radio.Group optionType="button" buttonStyle="solid" options={[{ label: 'No', value: false }, { label: 'Yes', value: true }]} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(a, b) => a.has_discount !== b.has_discount}>
+            {({ getFieldValue }) => getFieldValue('has_discount') && (
+              <Form.Item name="discount_amount" label="Cash discount accepted by the vendor"
+                rules={[{ required: true, message: 'Enter the discount' },
+                  { validator: (_, val) => (Number(val) > 0 && Number(val) < Number(detail?.balance || 0) ? Promise.resolve() : Promise.reject(new Error(`Between ₹0 and the balance of ${inr(detail?.balance)}`))) }]}>
+                <InputNumber style={{ width: '100%' }} min={0} precision={2} prefix="₹" placeholder="e.g. 2% for paying early" />
+              </Form.Item>
+            )}
+          </Form.Item>
+          <Form.Item name="amount" label={`Amount paid from bank (balance ${detail ? inr(detail.balance) : ''})`} rules={[{ required: true, message: 'Enter the amount' }]}>
             <InputNumber style={{ width: '100%' }} min={0.01} max={detail ? Number(detail.balance) : undefined} prefix="₹" />
           </Form.Item>
           <Row gutter={12}>
@@ -561,6 +586,26 @@ const ApInvoiceAutomation = () => {
             </Col>
           </Row>
           <Form.Item name="reference" label="Reference (UTR / cheque no.)"><Input /></Form.Item>
+          <Form.Item noStyle shouldUpdate>
+            {({ getFieldValue }) => {
+              const cash = Number(getFieldValue('amount') || 0);
+              const disc = getFieldValue('has_discount') ? Number(getFieldValue('discount_amount') || 0) : 0;
+              if (!(cash > 0)) return null;
+              return (
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 12px 0', background: '#f8fafc' }}>
+                  <JournalEntryBlock je={{
+                    je_number: 'Journal entry on save',
+                    event_type: 'PAYMENT',
+                    lines: [
+                      { account_code: '2010', account_name: 'Accounts payable – trade', debit: cash + disc, credit: 0 },
+                      { account_code: '1010', account_name: 'Operating bank account', debit: 0, credit: cash },
+                      ...(disc > 0 ? [{ account_code: '4100', account_name: 'Discount received', debit: 0, credit: disc }] : [])
+                    ]
+                  }} />
+                </div>
+              );
+            }}
+          </Form.Item>
         </Form>
       </Modal>
 

@@ -23,4 +23,11 @@ router.put('/connections/:provider', knownProvider, asyncHandler(ctrl.saveCreden
 router.post('/connections/:provider/test', knownProvider, asyncHandler(ctrl.test));
 router.delete('/connections/:provider', knownProvider, asyncHandler(ctrl.disconnect));
 
+// Zoho Books sync: vendors, approved bills and payments (also automatic on approval / payment).
+const zoho = require('../controllers/zohoBooks.controller');
+router.get('/zoho_books/status', asyncHandler(zoho.status));
+router.get('/zoho_books/mapping', asyncHandler(zoho.mapping));
+router.put('/zoho_books/settings', asyncHandler(zoho.saveSettings));
+router.post('/zoho_books/sync', asyncHandler(zoho.syncNow));
+
 module.exports = router;

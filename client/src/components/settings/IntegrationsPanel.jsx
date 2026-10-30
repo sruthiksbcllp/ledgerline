@@ -5,6 +5,12 @@ import {
 import { CheckCircle2, ExternalLink, Link2, PlugZap, RefreshCcw, Settings2, Unplug } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
+import ZohoBooksSync from './ZohoBooksSync';
+import { getStoredUser } from '../../utils/session';
+
+// The LedgerLine platform team sees server setup details; customers never do.
+const PLATFORM_ROLES = ['PROVIDER_ADMIN', 'DEV_ADMIN'];
+const isPlatformUser = () => PLATFORM_ROLES.includes(String(getStoredUser()?.role || '').toUpperCase());
 
 const { Text, Paragraph } = Typography;
 
@@ -33,14 +39,14 @@ const Mark = ({ id }) => {
 const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : null);
 
 /** The status shown on a card. Never "connected" unless the server says so. */
-const statusOf = (item, live) => {
+const statusOf = (item, live, platform) => {
   const c = item.connection;
   if (!live && item.auth !== 'link') return { color: 'default', label: 'Not connected' };
   if (c?.status === 'CONNECTED') return { color: 'success', label: 'Connected' };
   if (c?.status === 'CONFIGURED') return { color: 'success', label: 'Configured' };
   if (c?.status === 'SAVED') return { color: 'processing', label: 'Saved · not verified' };
   if (c?.status === 'ERROR') return { color: 'error', label: 'Needs attention' };
-  if (!item.setup.ready && item.auth !== 'link') return { color: 'warning', label: 'Setup required' };
+  if (!item.setup.ready && item.auth !== 'link') return platform ? { color: 'warning', label: 'Setup required' } : { color: 'default', label: 'Coming soon' };
   return { color: 'default', label: 'Not connected' };
 };
 
@@ -158,7 +164,8 @@ const ConnectModal = ({ item, onClose, onDone }) => {
 
 const IntegrationCard = ({ item, live, busy, onConnect, onPreview, onTest, onDisconnect }) => {
   const navigate = useNavigate();
-  const status = statusOf(item, live);
+  const platform = isPlatformUser();
+  const status = statusOf(item, live, platform);
   const c = live || item.auth === 'link' ? item.connection : null;
   const blocked = live && !item.setup.ready && !c && item.auth !== 'link' && item.auth !== 'platform';
 
@@ -173,7 +180,7 @@ const IntegrationCard = ({ item, live, busy, onConnect, onPreview, onTest, onDis
       : <Text type="secondary" style={{ fontSize: 12 }}>Managed by the LedgerLine platform team</Text>;
   } else if (!c) {
     actions = blocked
-      ? <Tooltip title={<SetupHelp item={item} />}><Button disabled icon={<PlugZap size={14} />}>Connect</Button></Tooltip>
+      ? <Tooltip title={platform ? <SetupHelp item={item} /> : `${item.name} is not switched on for your LedgerLine account yet. Contact LedgerLine support.`}><Button disabled icon={<PlugZap size={14} />}>Connect</Button></Tooltip>
       : <Button type="primary" icon={<PlugZap size={14} />} loading={busy === 'connect'} onClick={onConnect}>Connect</Button>;
   } else {
     actions = (
@@ -213,11 +220,12 @@ const IntegrationCard = ({ item, live, busy, onConnect, onPreview, onTest, onDis
           {c.last_checked_at ? ` · checked ${when(c.last_checked_at)}` : ''}
         </Text>
       )}
-      {blocked && <Text type="warning" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>Waiting for API credentials on the server.</Text>}
+      {blocked && <Text type="warning" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>{platform ? 'Waiting for API credentials on the server.' : 'Not switched on for your account yet. Contact LedgerLine support.'}</Text>}
+      {live && !c && !blocked && item.auth === 'oauth2' && <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>Click Connect and sign in with your {item.name} username and password. No other setup is needed.</Text>}
       {live && item.auth === 'platform' && !c && <Text type="warning" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>Not configured on the server yet.</Text>}
       <div style={{ marginTop: 'auto', paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         {actions}
-        {item.docs_url && (
+        {platform && item.docs_url && (
           <a href={item.docs_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
             Docs <ExternalLink size={11} style={{ verticalAlign: -1 }} />
           </a>
@@ -313,6 +321,7 @@ const IntegrationsPanel = () => {
           description="Connect options are shown for every app LedgerLine will support. Connections will be switched on once the integrations are activated; nothing is sent to these apps yet." />
       )}
       {live && !hasCompany && <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="Select a company to connect its apps. Integrations are set up per company." />}
+      {live && ['CONNECTED', 'ERROR'].includes(items.find((i) => i.key === 'zoho_books')?.connection?.status) && <ZohoBooksSync />}
       {/* One dropdown per category; collapsed until clicked. */}
       <Collapse
         style={{ marginBottom: 16, background: 'transparent' }}

@@ -14,7 +14,7 @@ const { extractInvoice, checkInvoiceNumbers, normalizeDate, toNumber } = require
 const { ExtractionError } = require('../services/vendorExtraction.service');
 const { recordAudit, documentHistory } = require('../utils/financeAudit');
 // The vendor is paid the invoice total less TDS; the TDS goes to the government (AP JE reference 5.1).
-const { netPayableOf, tdsOf } = require('../services/apJournal.service');
+const { netPayableOf, balanceOf, tdsOf } = require('../services/apJournal.service');
 
 const STATUS_LABEL = {
   UNPAID: 'Pending', APPROVED_FOR_PAYMENT: 'Approved', PARTIAL: 'Partially Paid', PAID: 'Paid',
@@ -212,7 +212,7 @@ exports.list = async (req, res) => {
     success: true,
     data: rows.map((r) => {
       const j = r.toJSON();
-      const balance = round2(netPayableOf(j) - Number(j.paid_amount || 0));
+      const balance = balanceOf(j);
       const overdue = j.due_date && balance > 0 && !['PAID', 'REJECTED'].includes(j.status) && new Date(j.due_date) < new Date(new Date().toDateString());
       return { ...j, balance, overdue, status_label: STATUS_LABEL[j.status] || j.status };
     })
@@ -234,7 +234,7 @@ exports.detail = async (req, res) => {
   if (!invoice) return fail(res, 404, 'Invoice not found');
   const history = await documentHistory(tenantWhere, 'INVOICE', invoice.id);
   const j = invoice.toJSON();
-  return res.json({ success: true, data: { ...j, tds_deducted: tdsOf(j), net_payable: netPayableOf(j), balance: round2(netPayableOf(j) - Number(j.paid_amount || 0)), status_label: STATUS_LABEL[j.status] || j.status, history } });
+  return res.json({ success: true, data: { ...j, tds_deducted: tdsOf(j), net_payable: netPayableOf(j), balance: balanceOf(j), status_label: STATUS_LABEL[j.status] || j.status, history } });
 };
 
 const loadOwned = (req) => Invoice.findOne({ where: { ...buildAdminWhere(req), id: req.params.id } });
@@ -268,8 +268,11 @@ exports.reject = async (req, res) => {
 
 exports.recordPayment = async (req, res) => {
   const amount = round2(toNumber(req.body?.amount));
+  // Cash discount the vendor accepts with this payment (settles that much of the balance without cash).
+  const discount = round2(toNumber(req.body?.discount_amount));
   const paymentDate = normalizeDate(req.body?.payment_date) || new Date().toISOString().slice(0, 10);
   if (!(amount > 0)) return fail(res, 400, 'Enter a payment amount greater than zero');
+  if (discount < 0) return fail(res, 400, 'The cash discount cannot be negative');
   try {
     const result = await sequelize.transaction(async (transaction) => {
       const invoice = await Invoice.findOne({ where: { ...buildAdminWhere(req), id: req.params.id }, transaction, lock: transaction.LOCK.UPDATE });
@@ -278,17 +281,20 @@ exports.recordPayment = async (req, res) => {
         return { status: 409, message: `Payments can only be recorded on approved invoices (this one is ${STATUS_LABEL[invoice.status] || invoice.status})` };
       }
       if (invoice.payment_blocked) return { status: 409, message: `Payment is blocked: ${invoice.payment_block_reason || 'open exception'}` };
-      const balance = round2(netPayableOf(invoice) - Number(invoice.paid_amount || 0));
-      if (amount > balance) return { status: 422, message: `Payment exceeds the balance due of ${balance}` };
+      const balance = balanceOf(invoice);
+      if (round2(amount + discount) > balance + 0.009) {
+        return { status: 422, message: discount ? `Payment plus discount (${round2(amount + discount)}) exceeds the balance due of ${balance}` : `Payment exceeds the balance due of ${balance}` };
+      }
       const before = invoice.toJSON();
       const paid = round2(Number(invoice.paid_amount || 0) + amount);
-      const fullyPaid = paid >= netPayableOf(invoice);
+      const discountTotal = round2(Number(invoice.discount_received || 0) + discount);
+      const fullyPaid = round2(paid + discountTotal) >= netPayableOf(invoice) - 0.009;
       await ApPayment.create({
-        client_id: invoice.client_id, invoice_id: invoice.id, amount, payment_date: paymentDate,
+        client_id: invoice.client_id, invoice_id: invoice.id, amount, discount_amount: discount, payment_date: paymentDate,
         payment_mode: req.body?.payment_mode || null, reference: req.body?.reference || null, notes: req.body?.notes || null, created_by: req.user.id
       }, { transaction });
       await invoice.update({
-        paid_amount: paid, status: fullyPaid ? 'PAID' : 'PARTIAL', ...(fullyPaid ? { payment_date: paymentDate } : {})
+        paid_amount: paid, discount_received: discountTotal, status: fullyPaid ? 'PAID' : 'PARTIAL', ...(fullyPaid ? { payment_date: paymentDate } : {})
       }, { transaction });
       return { invoice, before, fullyPaid };
     });
@@ -296,7 +302,7 @@ exports.recordPayment = async (req, res) => {
     await recordAudit(req, {
       module: 'AP', entityType: 'INVOICE', entityId: result.invoice.id,
       action: result.fullyPaid ? 'AP_INVOICE_PAID' : 'AP_PAYMENT_RECORDED', before: result.before, after: result.invoice,
-      note: `Payment of ${amount}${req.body?.reference ? ` (ref ${req.body.reference})` : ''}`
+      note: `Payment of ${amount}${discount ? ` plus cash discount ${discount}` : ''}${req.body?.reference ? ` (ref ${req.body.reference})` : ''}`
     });
     return res.json({ success: true, message: result.fullyPaid ? 'Invoice fully paid' : 'Partial payment recorded', data: result.invoice });
   } catch (error) {

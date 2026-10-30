@@ -46,5 +46,6 @@ db.Sequelize = Sequelize;
 require('../services/workflowTrail.service').install(db);
 // Balanced journal for every AP event (GRN, SES, invoice, payment).
 require('../services/apJournal.service').install(db);
+require('../services/integrations/zohoBooksSync').install(db); // pushes approved bills and payments to Zoho Books when connected
 
 module.exports = db;

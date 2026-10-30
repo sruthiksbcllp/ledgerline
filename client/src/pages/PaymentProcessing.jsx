@@ -1,17 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Col, Empty, Row, Space, Steps, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, Col, Empty, InputNumber, Row, Space, Steps, Table, Tag, Typography, message } from 'antd';
 import { CheckCircle2, RefreshCcw, WalletCards } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import { ActorStamp, formatWhen, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import api from '../utils/api';
 import {
-  inr, isOpenInvoice, journalFor, loadApInvoices, paymentJournal, plain,
+  inr, isPayableInvoice, loadApInvoices, payableBreakdown,
   readApStore, vendorName, writeApStore,
 } from '../utils/apLedger';
+import TdsDeposit from '../components/finance/TdsDeposit';
+import { JournalEntryBlock } from '../components/finance/JournalEntries';
 
 const { Text } = Typography;
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
-const navyHead = () => ({ style: { background: '#1E3A5F', color: '#fff', fontWeight: 700 } });
 
 const STEPS = [
   { key: 'DUE', title: 'Due Invoice' },
@@ -52,8 +53,20 @@ const PaymentProcessing = () => {
     return proposal.invoiceIds.map((id) => rows.find((row) => row.id === id)).filter(Boolean);
   }, [proposal, rows]);
 
-  const outstanding = proposalInvoices.reduce((sum, row) => sum + (row.status === 'PAID' ? 0 : journalFor(row).total), 0);
-  const payableTotal = proposalInvoices.reduce((sum, row) => sum + journalFor(row).total, 0);
+  // Paid in this proposal: open invoices without a match exception, at what the vendor is owed
+  // (total less TDS, advance and returns, less anything already paid). Rejected ones are never paid.
+  const payableRows = proposalInvoices.filter(isPayableInvoice);
+  const skippedRows = proposalInvoices.filter((row) => row.status !== 'PAID' && !isPayableInvoice(row));
+  const sums = payableRows.reduce((acc, row) => {
+    const b = payableBreakdown(row);
+    return { total: acc.total + b.total, tds: acc.tds + b.tds, advance: acc.advance + b.advance, returns: acc.returns + b.returns, paid: acc.paid + b.paid, balance: acc.balance + b.balance };
+  }, { total: 0, tds: 0, advance: 0, returns: 0, paid: 0, balance: 0 });
+  const outstanding = Math.round(sums.balance * 100) / 100;
+  // Cash discount per invoice, entered before the bank payment (kept on the proposal).
+  const discountOf = (row) => Math.min(Number(proposal?.discounts?.[row.id] || 0), payableBreakdown(row).balance);
+  const discountTotal = Math.round(payableRows.reduce((s, row) => s + (row.status === 'PAID' ? 0 : discountOf(row)), 0) * 100) / 100;
+  const bankPays = Math.round((outstanding - discountTotal) * 100) / 100;
+  const setDiscount = (row, value) => persistProposal({ ...proposal, discounts: { ...(proposal.discounts || {}), [row.id]: Number(value || 0) } });
   const confirmed = proposal?.status === 'CONFIRMED' || (proposalInvoices.length > 0 && proposalInvoices.every((row) => row.status === 'PAID'));
 
   const lastActions = useLastActions('INVOICE', proposalInvoices, rows);
@@ -85,7 +98,7 @@ const PaymentProcessing = () => {
   };
 
   const startFromDue = () => {
-    const due = rows.filter((row) => isOpenInvoice(row) && !store.holds[row.id]);
+    const due = rows.filter((row) => isPayableInvoice(row) && !store.holds[row.id]);
     if (!due.length) {
       message.warning('No due invoices are available for payment');
       return;
@@ -112,7 +125,7 @@ const PaymentProcessing = () => {
         message.success('Payment proposal prepared');
         await load();
       } else if (current === 'PROPOSAL') {
-        const open = proposalInvoices.filter(isOpenInvoice);
+        const open = proposalInvoices.filter(isPayableInvoice);
         await Promise.all(open.map((row) => api.put(`/procurement/invoices/${row.id}/approve-for-payment`, {})));
         persistProposal(withStep(proposal, 'FINANCE_APPROVAL', await latestEventFor(open)));
         message.success('Sent for finance approval');
@@ -123,8 +136,8 @@ const PaymentProcessing = () => {
         message.success('Bank payment recorded');
         await load();
       } else if (current === 'BANK_PAYMENT') {
-        const open = proposalInvoices.filter(isOpenInvoice);
-        await Promise.all(open.map((row) => api.put(`/procurement/invoices/${row.id}/mark-paid`, {})));
+        const open = proposalInvoices.filter(isPayableInvoice);
+        await Promise.all(open.map((row) => api.put(`/procurement/invoices/${row.id}/mark-paid`, { discount_amount: discountOf(row) })));
         persistProposal(withStep(proposal, 'CONFIRMED', await latestEventFor(open)));
         message.success('Payment confirmed');
         await load();
@@ -210,18 +223,47 @@ const PaymentProcessing = () => {
         <Col xs={24} xl={10}>
           <Card style={{ ...contentCard, height: '100%' }} styles={{ body: { padding: 0 } }} title="Payment Entry">
             <div style={{ padding: '12px 16px' }}>
-              <Text type="secondary">Invoice outstanding: {inr(outstanding || payableTotal)}.</Text>
+              {[
+                ['Invoice total', sums.total],
+                ['Less TDS (paid to the government)', -sums.tds],
+                ['Less advance already paid', -sums.advance],
+                ['Less goods returned', -sums.returns],
+                ['Less already paid', -sums.paid],
+              ].filter(([, v], i) => i === 0 || Math.abs(v) > 0.009).map(([label, v]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">{label}</Text><Text>{v < 0 ? `– ${inr(-v)}` : inr(v)}</Text>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--color-border)', marginTop: 6, paddingTop: 6 }}>
+                <Text strong>Owed to vendor{payableRows.length ? ` (${payableRows.length} invoice${payableRows.length > 1 ? 's' : ''})` : ''}</Text><Text strong>{inr(outstanding)}</Text>
+              </div>
+              {discountTotal > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text type="secondary">Less cash discount</Text><Text>– {inr(discountTotal)}</Text>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text strong>Paid from bank</Text><Text strong>{inr(bankPays)}</Text>
+                  </div>
+                </>
+              )}
+              {skippedRows.length > 0 && (
+                <Text type="warning" style={{ display: 'block', marginTop: 6, fontSize: 12 }}>
+                  {skippedRows.length} invoice{skippedRows.length > 1 ? 's are' : ' is'} not paid here (rejected or on a 3-way match exception).
+                </Text>
+              )}
             </div>
-            <Table
-              rowKey="key"
-              pagination={false}
-              dataSource={paymentJournal(payableTotal)}
-              columns={[
-                { title: 'Account', dataIndex: 'account', onHeaderCell: navyHead },
-                { title: 'Debit', dataIndex: 'debit', align: 'right', onHeaderCell: navyHead, render: (v) => (Number(v) ? plain(v) : '') },
-                { title: 'Credit', dataIndex: 'credit', align: 'right', onHeaderCell: navyHead, render: (v) => (Number(v) ? plain(v) : '') },
-              ]}
-            />
+            <div style={{ padding: '0 16px' }}>
+              <JournalEntryBlock je={{
+                je_number: 'Journal entry on payment',
+                event_type: 'PAYMENT',
+                lines: [
+                  { account_code: '2010', account_name: 'Accounts payable – trade', debit: outstanding, credit: 0 },
+                  { account_code: '1010', account_name: 'Operating bank account', debit: 0, credit: bankPays },
+                  ...(discountTotal > 0 ? [{ account_code: '4100', account_name: 'Discount received', debit: 0, credit: discountTotal }] : [])
+                ]
+              }} />
+            </div>
           </Card>
         </Col>
         <Col xs={24}>
@@ -235,14 +277,36 @@ const PaymentProcessing = () => {
               columns={[
                 { title: 'Invoice', dataIndex: 'invoice_number', render: (v) => v || '—' },
                 { title: 'Vendor', key: 'vendor', render: (_, row) => vendorName(row) },
-                { title: 'Amount', key: 'amount', align: 'right', render: (_, row) => inr(journalFor(row).total) },
-                { title: 'Status', dataIndex: 'status', render: (v) => <Tag color={v === 'PAID' ? 'success' : 'processing'}>{v || 'UNPAID'}</Tag> },
+                {
+                  title: 'To pay', key: 'amount', align: 'right',
+                  render: (_, row) => {
+                    const b = payableBreakdown(row);
+                    return <div>{isPayableInvoice(row) ? inr(b.balance) : '—'}<div><Text type="secondary" style={{ fontSize: 12 }}>Invoice {inr(b.total)}</Text></div></div>;
+                  }
+                },
+                {
+                  title: 'Cash discount', key: 'discount', width: 140,
+                  render: (_, row) => (isPayableInvoice(row) && !confirmed
+                    ? <InputNumber size="small" min={0} max={payableBreakdown(row).balance} precision={2} prefix="₹" placeholder="None"
+                        value={proposal?.discounts?.[row.id] || null} onChange={(v) => setDiscount(row, v)} style={{ width: 120 }} />
+                    : (Number(row.discount_received) > 0 ? inr(row.discount_received) : '—'))
+                },
+                {
+                  title: 'Status', dataIndex: 'status',
+                  render: (v, row) => {
+                    if (v === 'REJECTED') return <Tag color="error">Rejected – not paid</Tag>;
+                    if (!isPayableInvoice(row) && v !== 'PAID') return <Tag color="warning">Match exception – not paid</Tag>;
+                    return <Tag color={v === 'PAID' ? 'success' : 'processing'}>{v || 'UNPAID'}</Tag>;
+                  }
+                },
                 lastActionColumn('INVOICE', lastActions, { numberOf: (r) => r.invoice_number }),
               ]}
             />
           </Card>
         </Col>
       </Row>
+
+      <TdsDeposit style={{ ...contentCard, marginTop: 16 }} />
 
       <Card style={{ ...contentCard, marginTop: 16 }} title="P2P Completion">
         <Space direction="vertical">

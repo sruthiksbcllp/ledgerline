@@ -12,6 +12,7 @@ module.exports = (sequelize, DataTypes) => {
     client_id: { type: DataTypes.INTEGER, allowNull: false },
     invoice_id: { type: DataTypes.INTEGER, allowNull: false },
     amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
+    discount_amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 }, // cash discount accepted by the vendor with this payment
     payment_date: { type: DataTypes.DATEONLY, allowNull: false },
     payment_mode: { type: DataTypes.STRING(30), allowNull: true },
     reference: { type: DataTypes.STRING(100), allowNull: true },

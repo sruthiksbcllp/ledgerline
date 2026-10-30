@@ -91,6 +91,69 @@ exports.advancePreview = async (req, res) => {
   return res.json({ success: true, data: await journals.advanceStatus(po.id) });
 };
 
+/**
+ * TDS payable by section: deducted on invoices (credits to 2160, less reversals) against what has
+ * been deposited with the government (TDS_DEPOSIT journals), plus the deposits made.
+ */
+async function tdsBySection(clientId) {
+  const lines = await JournalLine.findAll({
+    where: { client_id: clientId, account_code: '2160' },
+    include: [{ model: JournalEntry, as: 'entry', attributes: ['event_type'] }],
+    attributes: ['debit', 'credit', 'memo']
+  });
+  const by = {};
+  for (const l of lines) {
+    const section = (String(l.memo || '').match(/TDS u\/s (\S+)/) || [])[1] || 'Other';
+    const s = by[section] || (by[section] = { section, deducted: 0, deposited: 0 });
+    if (l.entry?.event_type === 'TDS_DEPOSIT') s.deposited += Number(l.debit) - Number(l.credit);
+    else s.deducted += Number(l.credit) - Number(l.debit);
+  }
+  return Object.values(by)
+    .map((s) => ({ section: s.section, deducted: round2(s.deducted), deposited: round2(s.deposited), balance: round2(s.deducted - s.deposited) }))
+    .filter((s) => s.deducted || s.deposited)
+    .sort((a, b) => a.section.localeCompare(b.section));
+}
+
+exports.tdsSummary = async (req, res) => {
+  const clientId = clientOf(req);
+  if (!clientId) return res.status(400).json({ success: false, message: 'Select a company first' });
+  await backfillOnce(clientId);
+  const sections = await tdsBySection(clientId);
+  const deposits = await JournalEntry.findAll({
+    where: { client_id: clientId, event_type: 'TDS_DEPOSIT' },
+    include: [{ model: JournalLine, as: 'lines' }],
+    order: [['entry_date', 'DESC'], ['id', 'DESC'], [{ model: JournalLine, as: 'lines' }, 'line_no', 'ASC']]
+  });
+  return res.json({ success: true, data: { sections, total_balance: round2(sections.reduce((s, x) => s + x.balance, 0)), deposits } });
+};
+
+/** TDS deposited with the government against a challan: Dr TDS payable, Cr Bank (ref 3.8). */
+exports.tdsDeposit = async (req, res) => {
+  const clientId = clientOf(req);
+  if (!clientId) return res.status(400).json({ success: false, message: 'Select a company first' });
+  const section = String(req.body?.section || '').trim();
+  const challan = String(req.body?.challan_number || '').trim();
+  const amount = round2(req.body?.amount);
+  const date = req.body?.deposit_date || new Date().toISOString().slice(0, 10);
+  if (!section) return res.status(400).json({ success: false, message: 'Choose the TDS section' });
+  if (!challan) return res.status(400).json({ success: false, message: 'Enter the challan number (CIN)' });
+  if (!(amount > 0)) return res.status(400).json({ success: false, message: 'Enter the amount deposited' });
+  const open = (await tdsBySection(clientId)).find((s) => s.section === section);
+  if (!open || amount > open.balance + 0.009) {
+    return res.status(400).json({ success: false, message: `Only ₹${(open?.balance || 0).toLocaleString('en-IN')} of TDS u/s ${section} is payable` });
+  }
+  const entry = await journals.post({
+    clientId, key: `TDS_DEPOSIT:${challan}:${section}`, eventType: 'TDS_DEPOSIT', sourceModule: 'TDS', sourceId: 0,
+    sourceRef: challan, date, narration: `TDS u/s ${section} deposited with the government – challan ${challan}`,
+    lines: [
+      { account: '2160', debit: amount, memo: `TDS u/s ${section} deposited – challan ${challan}` },
+      { account: '1010', credit: amount, memo: `TDS challan ${challan}` }
+    ]
+  });
+  if (!entry) return res.status(409).json({ success: false, message: `Challan ${challan} is already recorded for section ${section}` });
+  return res.status(201).json({ success: true, message: `TDS deposit of ₹${amount.toLocaleString('en-IN')} recorded (${entry.je_number})`, data: entry });
+};
+
 /** Debit, credit and balance per account. A reversal and the journal it reverses net to zero. */
 exports.balances = async (req, res) => {
   const clientId = clientOf(req);

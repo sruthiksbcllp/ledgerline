@@ -23,6 +23,7 @@ const EVENTS = {
   PAYMENT: { label: 'Payment', color: 'green' },
   ADVANCE: { label: 'Advance to vendor', color: 'gold' },
   PURCHASE_RETURN: { label: 'Purchase return', color: 'magenta' },
+  TDS_DEPOSIT: { label: 'TDS deposit', color: 'geekblue' },
   REVERSAL: { label: 'Reversal', color: 'volcano' },
 };
 
@@ -38,6 +39,8 @@ const RULES = [
   { key: 'retb', event: 'Return to vendor, before the invoice', debit: 'GR/IR clearing 2015', credit: 'Inventory 1200 / Consumables 6800 / Capital WIP 1500', ref: '1.5' },
   { key: 'reta', event: 'Return to vendor, after the invoice', debit: 'Accounts payable 2010 (value + GST)', credit: 'Inventory / Expense · Input CGST 1411 / SGST 1412 / IGST 1410', ref: '4.3' },
   { key: 'pay', event: 'Payment', debit: 'Accounts payable 2010', credit: 'Operating bank 1010', ref: '5.1 – 5.2' },
+  { key: 'disc', event: 'Payment with cash discount', debit: 'Accounts payable 2010 (full balance)', credit: 'Operating bank 1010 (cash paid) · Discount received 4100', ref: '5.3' },
+  { key: 'tds', event: 'TDS deposited with the government', debit: 'TDS payable 2160', credit: 'Operating bank 1010', ref: '3.8' },
   { key: 'rev', event: 'Invoice rejected after posting', debit: 'Each credit of the invoice journal', credit: 'Each debit of the invoice journal', ref: 'Reversal' },
 ];
 

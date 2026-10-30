@@ -21,6 +21,9 @@ router.get('/source/:module/:id', readers, wrap(ctrl.bySource));
 router.get('/preview/receipt/:poId', requireRead('GRN'), wrap(ctrl.receiptPreview));
 // Advance on a PO, shown when an invoice is entered against it.
 router.get('/preview/advance/:poId', requireRead('PO'), wrap(ctrl.advancePreview));
+// TDS payable by section and deposits against challans (Payment Processing → TDS deposit).
+router.get('/tds', rbacMiddleware(['FINANCE', 'ACCOUNTS_PAYABLE', 'DIRECTOR_CFO', 'MANAGEMENT']), wrap(ctrl.tdsSummary));
+router.post('/tds-deposit', rbacMiddleware(['FINANCE', 'ACCOUNTS_PAYABLE', 'DIRECTOR_CFO']), wrap(ctrl.tdsDeposit));
 router.post('/backfill', rbacMiddleware(['FINANCE']), wrap(ctrl.backfill));
 router.get('/:id', readers, wrap(ctrl.getOne));
 

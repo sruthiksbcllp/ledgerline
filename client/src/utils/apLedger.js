@@ -111,7 +111,28 @@ export function writeApStore(next) {
 }
 
 export function isOpenInvoice(inv) {
-  return inv && inv.status !== 'PAID';
+  return inv && inv.status !== 'PAID' && inv.status !== 'REJECTED';
+}
+
+/** Can go into a payment: open, and not held by a 3-way match exception. */
+export function isPayableInvoice(inv) {
+  return isOpenInvoice(inv) && inv.status !== 'EXCEPTION' && inv.matching_status !== 'MISMATCHED';
+}
+
+/**
+ * What the vendor is paid, as the server works it out (services/apJournal.service.js netPayableOf):
+ * invoice total less TDS, the PO advance set off and goods returned after the invoice.
+ */
+export function payableBreakdown(inv) {
+  const total = num(inv?.total_amount) || num(inv?.base_amount) + num(inv?.gst_amount);
+  const tdsRaw = inv?.tds_section_code ? num(inv?.tds_amount) : 0;
+  const tds = num(inv?.paid_amount) > total - tdsRaw + 0.009 ? 0 : tdsRaw; // paid gross before TDS was withheld
+  const advance = num(inv?.advance_adjusted);
+  const returns = num(inv?.returns_credit);
+  const net = Math.round((total - tds - advance - returns) * 100) / 100;
+  const paid = num(inv?.paid_amount);
+  const discount = num(inv?.discount_received); // cash discount already taken
+  return { total, tds, advance, returns, net, paid, discount, balance: Math.max(0, Math.round((net - paid - discount) * 100) / 100) };
 }
 
 /** Why an invoice has no journal yet, per the posting rules in services/apJournal.service.js. */

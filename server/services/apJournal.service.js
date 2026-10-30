@@ -33,6 +33,7 @@ const ACCOUNTS = [
   { code: '2010', name: 'Accounts payable – trade', type: 'LIABILITY', description: 'Amount owed to each vendor' },
   { code: '2015', name: 'GR/IR clearing', type: 'LIABILITY', description: 'Received, not yet invoiced' },
   { code: '2160', name: 'TDS payable', type: 'LIABILITY', description: 'Tax deducted at source, due to government' },
+  { code: '4100', name: 'Discount received', type: 'INCOME', description: 'Cash discount from vendors for early payment' },
   { code: '5010', name: 'Purchase price variance', type: 'EXPENSE', description: 'Invoice above the received value' },
   { code: '6350', name: 'Contract services expense', type: 'EXPENSE', description: 'Opex services received on an SES' },
   { code: '6800', name: 'Consumables & office supplies', type: 'EXPENSE', description: 'Opex goods received' }
@@ -64,6 +65,8 @@ const tdsOf = (inv) => {
  * advance set off, less goods returned after the invoice.
  */
 const netPayableOf = (inv) => round2(Number(inv?.total_amount || 0) - tdsOf(inv) - Number(inv?.advance_adjusted || 0) - Number(inv?.returns_credit || 0));
+/** Still to settle: what the vendor is owed less what was paid and any cash discount they accepted. */
+const balanceOf = (inv) => round2(netPayableOf(inv) - Number(inv?.paid_amount || 0) - Number(inv?.discount_received || 0));
 
 /** Receipt account for a PO: capex to Capital WIP, opex goods to consumables, services to services expense. */
 const receiptAccount = (po, kind) => {
@@ -397,13 +400,15 @@ async function postPayment(paymentId, opts = {}) {
   if (!pay || !(Number(pay.amount) > 0)) return null;
   const inv = await Invoice.findByPk(pay.invoice_id);
   if (!inv) return null;
+  const discount = round2(pay.discount_amount);
   return post({
     clientId: pay.client_id || inv.client_id, key: `PAYMENT:${pay.id}`, eventType: 'PAYMENT', sourceModule: 'PAYMENT', sourceId: pay.id,
     sourceRef: pay.reference || inv.invoice_number, date: pay.payment_date || pay.created_at, vendorId: inv.vendor_id, poId: inv.po_id, invoiceId: inv.id,
-    narration: `Payment to vendor for ${inv.invoice_number}${pay.payment_mode ? ` by ${pay.payment_mode}` : ''}`,
+    narration: `Payment to vendor for ${inv.invoice_number}${pay.payment_mode ? ` by ${pay.payment_mode}` : ''}${discount ? ` less cash discount ₹${inr(discount)}` : ''}`,
     lines: [
-      { account: '2010', debit: pay.amount, memo: `Settle ${inv.invoice_number}` },
-      { account: '1010', credit: pay.amount, memo: [pay.payment_mode, pay.reference].filter(Boolean).join(' · ') || 'Bank payment' }
+      { account: '2010', debit: round2(Number(pay.amount) + discount), memo: `Settle ${inv.invoice_number}` },
+      { account: '1010', credit: pay.amount, memo: [pay.payment_mode, pay.reference].filter(Boolean).join(' · ') || 'Bank payment' },
+      { account: '4100', credit: discount, memo: `Cash discount on ${inv.invoice_number}` }
     ],
     source: opts.source
   });
@@ -414,16 +419,21 @@ async function postSettlement(invoiceId, opts = {}) {
   const { Invoice, ApPayment } = m();
   const inv = await Invoice.findByPk(invoiceId);
   if (!inv || inv.status !== 'PAID') return null;
-  const recorded = Number(await ApPayment.sum('amount', { where: { invoice_id: inv.id } }) || 0);
-  const rest = round2(netPayableOf(inv) - recorded);
+  // Settle what recorded payments (cash + their discounts) have not; part of it may be a cash
+  // discount taken when marking paid (invoice discount beyond what the payments carried).
+  const cash = Number(await ApPayment.sum('amount', { where: { invoice_id: inv.id } }) || 0);
+  const payDiscount = Number(await ApPayment.sum('discount_amount', { where: { invoice_id: inv.id } }) || 0);
+  const rest = round2(netPayableOf(inv) - cash - payDiscount);
   if (!(rest > 0.009)) return null;
+  const discount = round2(Math.min(rest, Math.max(0, Number(inv.discount_received || 0) - payDiscount)));
   return post({
     clientId: inv.client_id, key: `SETTLEMENT:${inv.id}`, eventType: 'PAYMENT', sourceModule: 'INVOICE', sourceId: inv.id,
     sourceRef: inv.external_payment_ref || inv.invoice_number, date: inv.payment_date || inv.updated_at, vendorId: inv.vendor_id, poId: inv.po_id, invoiceId: inv.id,
-    narration: `Invoice ${inv.invoice_number} marked paid${inv.payment_source ? ` (${inv.payment_source})` : ''}`,
+    narration: `Invoice ${inv.invoice_number} marked paid${inv.payment_source ? ` (${inv.payment_source})` : ''}${discount ? ` less cash discount ₹${inr(discount)}` : ''}`,
     lines: [
       { account: '2010', debit: rest, memo: `Settle ${inv.invoice_number}` },
-      { account: '1010', credit: rest, memo: inv.external_payment_ref || 'Bank payment' }
+      { account: '1010', credit: round2(rest - discount), memo: inv.external_payment_ref || 'Bank payment' },
+      { account: '4100', credit: discount, memo: `Cash discount on ${inv.invoice_number}` }
     ],
     source: opts.source
   });
@@ -516,6 +526,6 @@ async function backfill(clientId) {
 }
 
 module.exports = {
-  ACCOUNTS, install, backfill, ensureAccounts, tdsOf, netPayableOf, receiptAccountsFor, advanceStatus,
+  ACCOUNTS, install, backfill, ensureAccounts, post, tdsOf, netPayableOf, balanceOf, receiptAccountsFor, advanceStatus,
   postAdvance, postGrn, postSes, postInvoice, postReturn, reverseInvoice, postPayment, postSettlement
 };
