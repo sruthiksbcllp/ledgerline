@@ -45,7 +45,8 @@ exports.syncNow = async (req, res) => {
     const link = type === 'VENDOR' ? await sync.syncVendor(clientId, n, { resync: true })
       : type === 'BILL' ? await sync.syncBill(clientId, n)
         : type === 'PAYMENT' ? await sync.syncPayment(clientId, { paymentId: n })
-          : null;
+          : type === 'TDS_DEPOSIT' ? await sync.syncTdsDeposit(clientId, n)
+            : null;
     if (!link && type !== 'PAYMENT') return res.status(400).json({ success: false, message: 'Unknown record type' });
     return res.json({ success: true, message: 'Sent to Zoho Books', data: link });
   } catch (e) { return fail(res, e); }

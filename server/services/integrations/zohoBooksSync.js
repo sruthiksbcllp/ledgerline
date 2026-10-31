@@ -9,6 +9,7 @@
  *     Return / cash discount → Zoho vendor credit against the bill
  *   Payment           → Zoho vendor payment applied to the bill; the invoice's TDS goes with the first
  *                       one as tax_amount_withheld, so cash + TDS clear the bill as in LedgerLine
+ *   TDS deposit       → Zoho manual journal: Dr TDS Payable, Cr Bank (challan number as reference)
  *
  * Accounts, taxes and the bank account are looked up in the organisation (settings can override the
  * account per LedgerLine account code). Every record's Zoho ID and last error are kept in
@@ -43,7 +44,9 @@ const ACCOUNT_HINTS = {
   1500: { types: ['fixed_asset'], words: ['furniture', 'equipment', 'asset', 'capital'] },
   6350: { types: ['expense', 'other_expense', 'cost_of_goods_sold'], words: ['contract', 'consult', 'professional', 'service', 'outsourc'] },
   6800: { types: ['expense', 'other_expense', 'cost_of_goods_sold'], words: ['office supplies', 'consumable', 'office expense', 'supplies'] },
-  4100: { types: ['income', 'other_income'], words: ['discount'] }
+  4100: { types: ['income', 'other_income'], words: ['discount'] },
+  // strict: only an account named like this, never just any liability account.
+  2160: { types: ['other_current_liability', 'current_liability', 'other_liability'], words: ['tds payable', 'tds'], strict: true }
 };
 
 // ── Connection and requests ──────────────────────────────────────────────────
@@ -128,7 +131,7 @@ function accountFor(code, row, lk) {
   const hint = ACCOUNT_HINTS[code] || ACCOUNT_HINTS[6800];
   const pool = lk.accounts.filter((a) => hint.types.includes(String(a.account_type || '').toLowerCase()) && a.is_active !== false);
   const named = pool.find((a) => hint.words.some((w) => String(a.account_name || '').toLowerCase().includes(w)));
-  const pick = named || pool[0];
+  const pick = named || (hint.strict ? null : pool[0]);
   if (!pick) throw new IntegrationError(`No Zoho Books account found for LedgerLine account ${code}. Choose one under Zoho Books → Account mapping.`, 422, 'NO_ACCOUNT');
   return pick.account_id;
 }
@@ -372,6 +375,27 @@ async function syncPayment(clientId, { paymentId, invoiceId }, ctx = {}) {
   return link;
 }
 
+/** A TDS deposit against a challan (TDS_DEPOSIT journal): Zoho manual journal, Dr TDS Payable, Cr Bank. */
+async function syncTdsDeposit(clientId, entryId, ctx = {}) {
+  const row = ctx.row || await connectionFor(clientId);
+  const lk = await lookups(row, ctx.cache || {});
+  const entry = await M().JournalEntry.findByPk(entryId, { include: [{ model: M().JournalLine, as: 'lines' }] });
+  if (!entry || entry.client_id !== clientId || entry.event_type !== 'TDS_DEPOSIT') throw new IntegrationError('TDS deposit not found', 404, 'NOT_FOUND');
+  const amount = round2(entry.total_debit);
+  const memo = (entry.lines || []).find((l) => Number(l.debit) > 0)?.memo || entry.narration;
+  return track(clientId, 'TDS_DEPOSIT', entry.id, async () => {
+    const res = await zoho(row, 'POST', '/journals', {
+      journal_date: day(entry.entry_date), reference_number: String(entry.source_ref || entry.je_number).slice(0, 100),
+      notes: String(entry.narration || '').slice(0, 500),
+      line_items: [
+        { account_id: accountFor(2160, row, lk), debit_or_credit: 'debit', amount, description: String(memo || '').slice(0, 500) },
+        { account_id: bankFor(row, lk), debit_or_credit: 'credit', amount, description: `TDS challan ${entry.source_ref || ''}`.trim() }
+      ]
+    });
+    return { id: res.journal?.journal_id, ref: `Challan ${entry.source_ref || entry.je_number}` };
+  });
+}
+
 /** Everything still to send for the company: approved/paid invoices with their vendors and payments. */
 async function syncAll(clientId) {
   const row = await connectionFor(clientId);
@@ -388,6 +412,8 @@ async function syncAll(clientId) {
     for (const p of await M().ApPayment.findAll({ where: { invoice_id: inv.id }, order: [['id', 'ASC']] })) await run(`Payment on ${inv.invoice_number}`, () => syncPayment(clientId, { paymentId: p.id }, { row, cache }));
     if (inv.status === 'PAID') await run(`Settlement of ${inv.invoice_number}`, () => syncPayment(clientId, { invoiceId: inv.id }, { row, cache }));
   }
+  const deposits = await M().JournalEntry.findAll({ where: { client_id: clientId, event_type: 'TDS_DEPOSIT', status: 'POSTED' }, order: [['id', 'ASC']] });
+  for (const d of deposits) await run(`TDS deposit ${d.source_ref || d.je_number}`, () => syncTdsDeposit(clientId, d.id, { row, cache }));
   return out;
 }
 
@@ -396,7 +422,7 @@ async function status(clientId) {
   const links = await M().IntegrationLink.findAll({ where: { client_id: clientId, provider: PROVIDER }, order: [['updated_at', 'DESC']] });
   const count = (type, st) => links.filter((l) => l.entity_type === type && l.status === st).length;
   return {
-    counts: ['VENDOR', 'BILL', 'ADVANCE', 'PAYMENT', 'SETTLEMENT', 'CREDIT', 'DISCOUNT', 'DISCOUNT_SETTLEMENT'].map((t) => ({ type: t, synced: count(t, 'SYNCED'), failed: count(t, 'FAILED') })),
+    counts: ['VENDOR', 'BILL', 'ADVANCE', 'PAYMENT', 'SETTLEMENT', 'CREDIT', 'DISCOUNT', 'DISCOUNT_SETTLEMENT', 'TDS_DEPOSIT'].map((t) => ({ type: t, synced: count(t, 'SYNCED'), failed: count(t, 'FAILED') })),
     failures: links.filter((l) => l.status === 'FAILED').slice(0, 20).map((l) => ({ type: l.entity_type, local_id: l.local_id, error: l.last_error, at: l.updated_at })),
     warnings: links.filter((l) => l.status === 'SYNCED' && l.last_error).slice(0, 20).map((l) => ({ type: l.entity_type, local_id: l.local_id, name: l.external_ref, warning: l.last_error })),
     last_synced_at: links.find((l) => l.synced_at)?.synced_at || null
@@ -461,7 +487,7 @@ function later(label, clientId, fn, options) {
 }
 
 function install(db) {
-  const { Invoice: Inv, ApPayment: Pay } = db;
+  const { Invoice: Inv, ApPayment: Pay, JournalEntry: Je } = db;
   if (Inv) {
     Inv.addHook('afterUpdate', 'zohoBooks', (row, o) => {
       if (typeof row.changed !== 'function' || !row.changed('status')) return;
@@ -470,6 +496,11 @@ function install(db) {
     });
   }
   if (Pay) Pay.addHook('afterCreate', 'zohoBooks', (row, o) => later(`payment ${row.id}`, row.client_id, () => syncPayment(row.client_id, { paymentId: row.id }), o));
+  if (Je) {
+    Je.addHook('afterCreate', 'zohoBooks', (row, o) => {
+      if (row.event_type === 'TDS_DEPOSIT') later(`TDS deposit ${row.id}`, row.client_id, () => syncTdsDeposit(row.client_id, row.id), o);
+    });
+  }
 }
 
-module.exports = { install, syncVendor, syncBill, syncPayment, syncAll, status, mapping, saveSettings, stateOf };
+module.exports = { install, syncVendor, syncBill, syncPayment, syncTdsDeposit, syncAll, status, mapping, saveSettings, stateOf };

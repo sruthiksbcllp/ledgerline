@@ -12,14 +12,16 @@ import api from '../../utils/api';
 const { Text } = Typography;
 const LABEL = {
   VENDOR: 'Vendors', BILL: 'Bills', ADVANCE: 'Advances', PAYMENT: 'Payments', SETTLEMENT: 'Marked paid',
-  CREDIT: 'Return credits', DISCOUNT: 'Cash discounts', DISCOUNT_SETTLEMENT: 'Cash discounts (marked paid)'
+  CREDIT: 'Return credits', DISCOUNT: 'Cash discounts', DISCOUNT_SETTLEMENT: 'Cash discounts (marked paid)',
+  TDS_DEPOSIT: 'TDS deposits'
 };
 const ACCOUNTS = [
   ['6800', 'Consumables & office supplies (OPEX goods)'],
   ['6350', 'Contract services (OPEX services)'],
   ['1500', 'Capital WIP / fixed assets (CAPEX)'],
   ['1200', 'Inventory (stock items)'],
-  ['4100', 'Discount received (cash discounts)']
+  ['4100', 'Discount received (cash discounts)'],
+  ['2160', 'TDS payable (TDS deposits)']
 ];
 
 const ZohoBooksSync = ({ onDisconnect, disconnecting }) => {
