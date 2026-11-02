@@ -40,6 +40,10 @@ module.exports = (sequelize) => {
     discount_received: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 }, // cash discount taken when paying
     hsn_sac_code: { type: DataTypes.STRING(20) },
     itc_eligible: { type: DataTypes.BOOLEAN, defaultValue: true },
+    reverse_charge: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // RCM: the company pays the GST, not the vendor
+    rcm_gst_amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 }, // GST paid under reverse charge (gst_amount stays 0)
+    payment_advice_sent_at: { type: DataTypes.DATE, allowNull: true }, // payment advice last emailed to the vendor
+    payment_advice_sent_to: { type: DataTypes.STRING(255), allowNull: true },
     document_url: { type: DataTypes.STRING(500) },
     // Pending = UNPAID, Approved = APPROVED_FOR_PAYMENT, Partially Paid = PARTIAL, Paid = PAID.
     status: { type: DataTypes.ENUM('UNPAID', 'PARTIAL', 'PAID', 'EXCEPTION', 'APPROVED_FOR_PAYMENT', 'WAITING_FOR_PAYMENT', 'REJECTED'), defaultValue: 'UNPAID' },

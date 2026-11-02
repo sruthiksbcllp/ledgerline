@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message, Empty, Row, Col, Upload, Typography, Alert, Popconfirm, Tooltip, Drawer, Radio } from 'antd';
+import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message, Empty, Row, Col, Upload, Typography, Alert, Popconfirm, Tooltip, Drawer, Radio, Switch } from 'antd';
 import { Plus, RefreshCcw, Download, Upload as UploadIcon, Eye, FileText, Trash2, Edit2, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
@@ -8,6 +8,7 @@ import { ActivityTrail, lastActionColumn, useLastActions } from '../components/p
 import { TDS_SECTIONS, defaultTdsRate } from '../config/tds';
 import { JournalEntries } from '../components/finance/JournalEntries';
 import { invoiceJournalHint } from '../utils/apLedger';
+import { PaymentAdviceButton } from '../components/finance/PaymentAdvice';
 
 const { Title, Text } = Typography;
 
@@ -93,7 +94,7 @@ const InvoiceProcessing = () => {
 
   const submit = async (values) => {
     try {
-      const payload = { ...values, total_amount: Number(values.base_amount || 0) + Number(values.gst_amount || 0) };
+      const payload = { ...values, total_amount: Number(values.base_amount || 0) + (values.reverse_charge ? 0 : Number(values.gst_amount || 0)) };
       if (!editingInvoice) payload.tds_section_code = values.tds_section_code || 'NONE'; // '' = No TDS for this invoice
       if (editingInvoice) {
         await api.put(`/procurement/invoices/${editingInvoice.id}`, payload);
@@ -388,6 +389,7 @@ const InvoiceProcessing = () => {
                 form.setFieldsValue({
                   grn_id: undefined, ses_id: undefined,
                   tds_section_code: vendor?.tds_section_code || '',
+                  reverse_charge: Boolean(vendor?.rcm_applicable),
                   tds_rate_percent: vendor?.tds_section_code ? Number(vendor.tds_rate_percent ?? defaultTdsRate(vendor.tds_section_code) ?? 0) : 0
                 });
               }}
@@ -439,10 +441,20 @@ const InvoiceProcessing = () => {
             <Form.Item name="base_amount" label="Base Amount" style={{ flex: 1 }} rules={[{ required: true, message: 'Required' }]}>
               <InputNumber style={{ width: '100%' }} min={0} placeholder="0.00" prefix="₹" />
             </Form.Item>
-            <Form.Item name="gst_amount" label="GST Amount" style={{ flex: 1 }} initialValue={0}>
-              <InputNumber style={{ width: '100%' }} min={0} placeholder="0.00" prefix="₹" />
+            <Form.Item noStyle shouldUpdate={(a, b) => a.reverse_charge !== b.reverse_charge}>
+              {() => (
+                <Form.Item name="gst_amount" label={form.getFieldValue('reverse_charge') ? 'GST we pay (reverse charge)' : 'GST Amount'} style={{ flex: 1 }} initialValue={0}>
+                  <InputNumber style={{ width: '100%' }} min={0} placeholder="0.00" prefix="₹" />
+                </Form.Item>
+              )}
             </Form.Item>
           </Space>
+          {!editingInvoice && (
+            <Form.Item name="reverse_charge" label="Reverse charge (RCM)" valuePropName="checked" initialValue={false}
+              extra="On: the vendor charges no GST and we pay it to the government (unregistered vendor, legal fees, GTA freight). The vendor is paid the base amount only.">
+              <Switch />
+            </Form.Item>
+          )}
           {!editingInvoice && (
             <Space style={{ width: '100%' }} align="start">
               <Form.Item name="tds_section_code" label="TDS Section" style={{ flex: 1, minWidth: 220 }} initialValue="">
@@ -465,7 +477,7 @@ const InvoiceProcessing = () => {
             <Form.Item noStyle shouldUpdate>
               {({ getFieldValue }) => {
                 const base = Number(getFieldValue('base_amount') || 0);
-                const total = base + Number(getFieldValue('gst_amount') || 0);
+                const total = base + (getFieldValue('reverse_charge') ? 0 : Number(getFieldValue('gst_amount') || 0));
                 const tds = getFieldValue('tds_section_code') ? Math.round(base * Number(getFieldValue('tds_rate_percent') || 0)) / 100 : 0;
                 const advance = Math.min(advanceInfo.available, Math.max(0, total - tds));
                 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -497,6 +509,7 @@ const InvoiceProcessing = () => {
 
       <Drawer
         title="Invoice Details"
+        extra={<PaymentAdviceButton invoice={viewingInvoice} onSent={(d) => { setViewingInvoice((v) => ({ ...v, payment_advice_sent_at: d?.sent_at, payment_advice_sent_to: d?.sent_to })); load(); }} />}
         open={!!viewingInvoice}
         onClose={() => setViewingInvoice(null)}
         width={560}
@@ -509,6 +522,7 @@ const InvoiceProcessing = () => {
             <Descriptions.Item label="Total Amount">₹{Number(viewingInvoice.total_amount || 0).toLocaleString('en-IN')}</Descriptions.Item>
             <Descriptions.Item label="Base Amount">₹{Number(viewingInvoice.base_amount || 0).toLocaleString('en-IN')}</Descriptions.Item>
             <Descriptions.Item label="GST Amount">₹{Number(viewingInvoice.gst_amount || 0).toLocaleString('en-IN')}</Descriptions.Item>
+            {viewingInvoice.reverse_charge && <Descriptions.Item label="GST we pay (reverse charge)">₹{Number(viewingInvoice.rcm_gst_amount || 0).toLocaleString('en-IN')}</Descriptions.Item>}
             {Number(viewingInvoice.advance_adjusted) > 0 && <Descriptions.Item label="Advance adjusted">– ₹{Number(viewingInvoice.advance_adjusted).toLocaleString('en-IN')}</Descriptions.Item>}
             {Number(viewingInvoice.returns_credit) > 0 && <Descriptions.Item label="Goods returned (incl. GST)">– ₹{Number(viewingInvoice.returns_credit).toLocaleString('en-IN')}</Descriptions.Item>}
             <Descriptions.Item label="Status"><Tag color={STATUS_COLOR[viewingInvoice.status] || 'default'}>{viewingInvoice.status || 'UNPAID'}</Tag></Descriptions.Item>

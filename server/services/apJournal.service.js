@@ -8,6 +8,7 @@
  *   Service receipt (SES)   Dr Contract services / Capital WIP          Cr GR/IR clearing
  *   Invoice                 Dr GR/IR (+ PPV), Dr Input CGST/SGST/IGST   Cr Vendor (net of TDS), Cr TDS payable  (ref 2.1–2.6)
  *                           no receipt on the PO: Dr the expense directly; GST not creditable: GST into the cost (ref 3.4)
+ *                           reverse charge: Dr Input GST – RCM            Cr GST payable – RCM   (ref 3.1)
  *   Payment                 Dr Vendor                                   Cr Bank                (ref 5.1–5.2)
  *   Advance on a PO         Dr Advances to vendors                      Cr Bank                (ref 4.1–4.2)
  *                           adjusted on the PO's invoices: Cr Advances to vendors, Vendor credit reduced
@@ -29,10 +30,12 @@ const ACCOUNTS = [
   { code: '1410', name: 'Input IGST', type: 'ASSET', description: 'GST input tax credit – inter-state and imports' },
   { code: '1411', name: 'Input CGST', type: 'ASSET', description: 'GST input tax credit – intra-state' },
   { code: '1412', name: 'Input SGST', type: 'ASSET', description: 'GST input tax credit – intra-state' },
+  { code: '1415', name: 'Input GST – RCM', type: 'ASSET', description: 'GST credit on reverse-charge purchases, once the RCM tax is paid' },
   { code: '1500', name: 'Capital work-in-progress / Fixed assets', type: 'ASSET', description: 'Capex receipts' },
   { code: '2010', name: 'Accounts payable – trade', type: 'LIABILITY', description: 'Amount owed to each vendor' },
   { code: '2015', name: 'GR/IR clearing', type: 'LIABILITY', description: 'Received, not yet invoiced' },
   { code: '2160', name: 'TDS payable', type: 'LIABILITY', description: 'Tax deducted at source, due to government' },
+  { code: '2170', name: 'GST payable – RCM', type: 'LIABILITY', description: 'GST the company pays in cash on reverse-charge purchases' },
   { code: '4100', name: 'Discount received', type: 'INCOME', description: 'Cash discount from vendors for early payment' },
   { code: '5010', name: 'Purchase price variance', type: 'EXPENSE', description: 'Invoice above the received value' },
   { code: '6350', name: 'Contract services expense', type: 'EXPENSE', description: 'Opex services received on an SES' },
@@ -285,6 +288,15 @@ async function postInvoice(invoiceId, opts = {}) {
         lines.push({ account: '1410', debit: gst, memo: 'Input GST (CGST/SGST split not determined)' });
       }
     }
+  }
+  // Reverse charge: the vendor charged no GST; the company owes it to the government and takes the
+  // credit (into the cost when not creditable). It never touches what the vendor is owed.
+  const rcm = inv.reverse_charge ? round2(inv.rcm_gst_amount) : 0;
+  if (rcm > 0) {
+    lines.push(inv.itc_eligible === false
+      ? { account: costAcct, debit: rcm, memo: 'GST under reverse charge – not creditable, part of cost' }
+      : { account: '1415', debit: rcm, memo: 'Input GST under reverse charge' });
+    lines.push({ account: '2170', credit: rcm, memo: `GST payable under reverse charge on ${inv.invoice_number}` });
   }
   const advance = round2(inv.advance_adjusted);
   const netOf = [tds && 'TDS', advance && 'advance'].filter(Boolean).join(' and ');

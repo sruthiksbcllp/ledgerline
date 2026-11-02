@@ -946,6 +946,9 @@ exports.decideVendorChangeRequest = async (req, res) => {
     const request = await VendorChangeRequest.findOne({ where: { id: req.params.requestId, ...buildWhere(req) } });
     if (!request) return error(res, 'Vendor change request not found', 404);
     if (request.status !== 'PENDING') return error(res, 'Vendor change request is already decided', 400);
+    if (action === 'APPROVE' && request.requested_by && Number(request.requested_by) === Number(req.user?.id)) {
+      return error(res, 'You requested this vendor change, so another user must approve it.', 403);
+    }
 
     const vendor = await Vendor.findOne({ where: { id: request.vendor_id, ...buildWhere(req) } });
     if (!vendor) return error(res, 'Vendor not found', 404);

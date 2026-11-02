@@ -34,6 +34,7 @@ module.exports = (sequelize) => {
     compliance_risk_band: { type: DataTypes.ENUM('BLUE', 'GOLD', 'ORANGE', 'RED'), defaultValue: 'BLUE' },
     tds_section_code: { type: DataTypes.STRING(20) },
     tds_rate_percent: { type: DataTypes.DECIMAL(5, 2), defaultValue: 2 },
+    rcm_applicable: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // reverse charge: we pay the GST on this vendor's bills
     gstin_status: { type: DataTypes.STRING(30), defaultValue: 'UNVERIFIED' },
     gstin_validated_at: { type: DataTypes.DATE },
     status: { type: DataTypes.ENUM('DRAFT', 'ACTIVE', 'BLACKLISTED'), defaultValue: 'DRAFT' },

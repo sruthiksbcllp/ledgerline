@@ -16,6 +16,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 
 router.get('/', readers, wrap(ctrl.list));
 router.get('/balances', readers, wrap(ctrl.balances));
+router.get('/grir-open', readers, wrap(ctrl.grirOpen));
 router.get('/source/:module/:id', readers, wrap(ctrl.bySource));
 // Entry preview on the GRN screen: anyone who may see goods receipts (incl. Warehouse, who records them).
 router.get('/preview/receipt/:poId', requireRead('GRN'), wrap(ctrl.receiptPreview));

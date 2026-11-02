@@ -181,6 +181,64 @@ exports.balances = async (req, res) => {
   return res.json({ success: true, data: { accounts: rows, total_debit: totalDebit, total_credit: totalCredit, balanced: Math.abs(totalDebit - totalCredit) < 0.01 } });
 };
 
+/**
+ * Received, not yet invoiced (month-end GR/IR review, AP JE reference 7.1 and 7.3): every goods or
+ * service receipt still open on GR/IR clearing at the date, with its age. The open amount is the
+ * receipt's credit to 2015 less the GR/IR debits that name it (invoices clearing it, returns before
+ * invoicing), with invoice reversals putting it back. Receipts open over 90 days need follow-up.
+ */
+exports.grirOpen = async (req, res) => {
+  const clientId = clientOf(req);
+  if (!clientId) return res.status(400).json({ success: false, message: 'Select a company first' });
+  await backfillOnce(clientId);
+  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.as_of || '')) ? req.query.as_of : new Date().toISOString().slice(0, 10);
+  const lines = await JournalLine.findAll({
+    where: { client_id: clientId, account_code: '2015' },
+    attributes: ['debit', 'credit', 'memo', 'journal_entry_id'],
+    include: [{ model: JournalEntry, as: 'entry', attributes: ['id', 'event_type', 'source_ref', 'entry_date', 'vendor_id', 'po_id'], where: { entry_date: { [Op.lte]: asOf } } }]
+  });
+  const receipts = lines.filter((l) => ['GOODS_RECEIPT', 'SERVICE_RECEIPT'].includes(l.entry.event_type) && Number(l.credit) > 0);
+  const others = lines.filter((l) => !['GOODS_RECEIPT', 'SERVICE_RECEIPT'].includes(l.entry.event_type));
+  // "GRN-1" must not match "GRN-10": the reference has to end at a non-word character.
+  const names = (memo, ref) => {
+    const text = String(memo || '');
+    for (let i = text.indexOf(ref); i >= 0; i = text.indexOf(ref, i + 1)) {
+      if (!/[A-Za-z0-9_-]/.test(text.charAt(i + ref.length))) return true;
+    }
+    return false;
+  };
+
+  const poIds = [...new Set(receipts.map((l) => l.entry.po_id).filter(Boolean))];
+  const vendorIds = [...new Set(receipts.map((l) => l.entry.vendor_id).filter(Boolean))];
+  const { PurchaseOrder } = require('../models');
+  const [pos, vendors] = await Promise.all([
+    poIds.length ? PurchaseOrder.findAll({ where: { id: poIds }, attributes: ['id', 'po_number'] }) : [],
+    vendorIds.length ? Vendor.findAll({ where: { id: vendorIds }, attributes: ['id', 'vendor_name'] }) : []
+  ]);
+  const poNo = Object.fromEntries(pos.map((p) => [p.id, p.po_number]));
+  const vendorName = Object.fromEntries(vendors.map((v) => [v.id, v.vendor_name]));
+  const day = 24 * 60 * 60 * 1000;
+  const bucketOf = (age) => (age <= 30 ? '0-30' : age <= 60 ? '31-60' : age <= 90 ? '61-90' : '90+');
+
+  const rows = receipts.map((l) => {
+    const ref = l.entry.source_ref;
+    const received = round2(l.credit);
+    const cleared = round2(others.filter((o) => names(o.memo, ref)).reduce((s, o) => s + Number(o.debit) - Number(o.credit), 0));
+    const open = round2(received - cleared);
+    const age = Math.max(0, Math.round((new Date(asOf) - new Date(l.entry.entry_date)) / day));
+    return {
+      journal_entry_id: l.entry.id, kind: l.entry.event_type === 'SERVICE_RECEIPT' ? 'Service' : 'Goods', receipt: ref,
+      po_number: poNo[l.entry.po_id] || null, vendor: vendorName[l.entry.vendor_id] || null, received_on: l.entry.entry_date,
+      received, invoiced: cleared, open, age_days: age, bucket: bucketOf(age)
+    };
+  }).filter((r) => r.open > 0.009).sort((a, b) => b.age_days - a.age_days);
+
+  const buckets = ['0-30', '31-60', '61-90', '90+'].map((b) => ({ bucket: b, count: rows.filter((r) => r.bucket === b).length, amount: round2(rows.filter((r) => r.bucket === b).reduce((s, r) => s + r.open, 0)) }));
+  const ledger = round2(lines.reduce((s, l) => s + Number(l.credit) - Number(l.debit), 0));
+  const total = round2(rows.reduce((s, r) => s + r.open, 0));
+  return res.json({ success: true, data: { as_of: asOf, rows, buckets, total_open: total, grir_balance: ledger, difference: round2(ledger - total) } });
+};
+
 /** Post any missing journals for this company's existing documents (safe to repeat). */
 exports.backfill = async (req, res) => {
   const clientId = clientOf(req);

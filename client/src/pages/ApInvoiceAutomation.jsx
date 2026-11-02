@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Button, Card, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Segmented,
-  Select, Space, Table, Tag, Typography, message,
+  Select, Space, Switch, Table, Tag, Typography, message,
 } from 'antd';
 import { CheckCircle2, FilePlus2, PenLine, ReceiptIndianRupee, RefreshCcw, Sparkles, Trash2, XCircle } from 'lucide-react';
 import dayjs from 'dayjs';
@@ -10,6 +10,7 @@ import { inr, invoiceJournalHint } from '../utils/apLedger';
 import { ChecksPanel, DocumentDropzone, StatusTag } from '../components/finance/DocumentReview';
 import { checkUploadFile, markProps } from '../utils/documentReview';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
+import { PaymentAdviceButton } from '../components/finance/PaymentAdvice';
 import InvoiceDocument from '../components/procurement/InvoiceDocument';
 import { JournalEntries, JournalEntryBlock } from '../components/finance/JournalEntries';
 
@@ -117,6 +118,7 @@ const ApInvoiceAutomation = () => {
       tax_amount: v.tax_amount,
       total_amount: v.total_amount,
       hsn_sac_code: v.hsn_sac_code,
+      reverse_charge: Boolean(v.reverse_charge),
       line_items: (v.line_items || []).filter((l) => l && (l.description || l.amount)),
       source: extraction ? 'AI_EXTRACTED' : 'MANUAL',
     };
@@ -223,6 +225,12 @@ const ApInvoiceAutomation = () => {
   const matches = extraction?.matches || {};
   const vendorOptions = vendors.map((v) => ({ value: v.id, label: `${v.vendor_name}${v.gst_number ? ` · ${String(v.gst_number).trim()}` : ''}` }));
   const selectedVendor = Form.useWatch('vendor_id', form);
+  // Reverse charge defaults from the vendor master each time the vendor changes.
+  useEffect(() => {
+    if (!selectedVendor) return;
+    const vendor = vendors.find((v) => Number(v.id) === Number(selectedVendor));
+    form.setFieldValue('reverse_charge', Boolean(vendor?.rcm_applicable));
+  }, [selectedVendor, vendors, form]);
   const poOptions = pos
     .filter((p) => !selectedVendor || Number(p.vendor_id) === Number(selectedVendor))
     .map((p) => ({ value: p.id, label: `${p.po_number}${p.total_amount ? ` · ${inr(p.total_amount)}` : ''}` }));
@@ -468,6 +476,10 @@ const ApInvoiceAutomation = () => {
                 </Form.Item>
               </Col>
             </Row>
+            <Form.Item name="reverse_charge" label="Reverse charge (RCM)" valuePropName="checked" initialValue={false}
+              extra="On: the vendor charged no GST and we pay the GST above to the government (unregistered vendor, legal fees, GTA freight). The vendor is owed the subtotal only.">
+              <Switch />
+            </Form.Item>
 
             <ChecksPanel checks={checks} checking={checking} />
           </Form>
@@ -489,6 +501,7 @@ const ApInvoiceAutomation = () => {
             {['APPROVED_FOR_PAYMENT', 'PARTIAL'].includes(detail.status) && (
               <Button type="primary" onClick={() => { payForm.setFieldsValue({ amount: Number(detail.balance), payment_date: dayjs(), has_discount: false, discount_amount: undefined }); setPayOpen(true); }}>Record payment</Button>
             )}
+            <PaymentAdviceButton invoice={detail} onSent={() => openDetail(detail.id)} />
           </Space>
         )}
       >

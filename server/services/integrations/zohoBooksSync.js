@@ -289,6 +289,9 @@ async function syncBill(clientId, invoiceId, ctx = {}) {
       }
     }
     if (gstInAmount) note = `GST of ₹${round2(inv.gst_amount)} included in the bill amount: Zoho Books holds the vendor as not GST-registered, so it does not allow GST on its bills. Check the vendor's GSTIN.`;
+    if (inv.reverse_charge && Number(inv.rcm_gst_amount) > 0) {
+      note = [note, `Reverse charge: the vendor charged no GST, so the bill has none. Record the RCM GST of ₹${round2(inv.rcm_gst_amount)} in Zoho Books.`].filter(Boolean).join(' ');
+    }
     return { id: res.bill.bill_id, ref: res.bill.bill_number, ...(note ? { warning: note } : {}) };
   }, { resync: false });
 

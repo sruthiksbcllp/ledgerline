@@ -125,6 +125,9 @@ router.get('/ap-invoices/:id', requireRead('INVOICE'), rbacMiddleware(AP_VIEWERS
 router.put('/ap-invoices/:id/approve', rbacMiddleware(AP_APPROVERS), blockWhenFinancialYearClosed, asyncHandler(apAutomation.approve));
 router.put('/ap-invoices/:id/reject', rbacMiddleware(AP_APPROVERS), blockWhenFinancialYearClosed, asyncHandler(apAutomation.reject));
 router.post('/ap-invoices/:id/payments', rbacMiddleware(AP_PAYERS), blockWhenFinancialYearClosed, asyncHandler(apAutomation.recordPayment));
+// Payment advice email to the vendor (works for invoices from Invoice Processing too): preview, then send after review.
+router.get('/ap-invoices/:id/payment-advice', rbacMiddleware(AP_PAYERS), asyncHandler(apAutomation.paymentAdvicePreview));
+router.post('/ap-invoices/:id/payment-advice', rbacMiddleware(AP_PAYERS), asyncHandler(apAutomation.paymentAdviceSend));
 
 // Invoice Routes
 router.get('/invoices', requireRead('INVOICE'), activityLog('PROCUREMENT', 'MODULE'), asyncHandler(procurementController.getInvoices));

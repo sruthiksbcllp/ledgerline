@@ -13,6 +13,8 @@ const { buildAdminWhere, getClientId } = require('../utils/tenantFilter');
 const { extractInvoice, checkInvoiceNumbers, normalizeDate, toNumber } = require('../services/invoiceExtraction.service');
 const { ExtractionError } = require('../services/vendorExtraction.service');
 const { recordAudit, documentHistory } = require('../utils/financeAudit');
+const { paymentBlockReason } = require('../services/apPaymentControls');
+const paymentAdvice = require('../services/paymentAdvice.service');
 // The vendor is paid the invoice total less TDS; the TDS goes to the government (AP JE reference 5.1).
 const { netPayableOf, balanceOf, tdsOf } = require('../services/apJournal.service');
 
@@ -71,6 +73,7 @@ async function reviewInvoice(req, body, excludeId = null) {
     tax_rate_percent: toNumber(body.tax_rate_percent),
     total_amount: toNumber(body.total_amount),
     hsn_sac_code: body.hsn_sac_code ? String(body.hsn_sac_code).trim() : null,
+    reverse_charge: body.reverse_charge === undefined || body.reverse_charge === null || body.reverse_charge === '' ? null : body.reverse_charge === true || body.reverse_charge === 'true',
     line_items: (Array.isArray(body.line_items) ? body.line_items : []).map((l) => ({
       description: String(l.description || '').trim(),
       quantity: toNumber(l.quantity),
@@ -90,8 +93,10 @@ async function reviewInvoice(req, body, excludeId = null) {
   else if (vendor.status === 'BLACKLISTED') add('vendor_id', 'error', 'This vendor is blacklisted');
   if (data.po_id && !po) add('po_id', 'error', 'Purchase order not found in your company');
   if (po && vendor && Number(po.vendor_id) !== Number(vendor.id)) add('po_id', 'error', `PO ${po.po_number} belongs to a different vendor`);
-  if (po && data.total_amount && Number(po.total_amount) > 0 && data.total_amount > Number(po.total_amount) * 1.02) {
-    add('total_amount', 'warning', `Invoice total exceeds PO ${po.po_number} value of ${po.total_amount}`);
+  // PO values are before GST, so compare the invoice before tax.
+  const preTax = data.subtotal ?? (data.total_amount != null ? data.total_amount - (data.tax_amount || 0) : null);
+  if (po && preTax && Number(po.total_amount) > 0 && preTax > Number(po.total_amount) * 1.02) {
+    add('total_amount', 'warning', `Invoice amount before tax exceeds PO ${po.po_number} value of ${po.total_amount}`);
   }
   if (!data.property_id && !po?.property_id) add('property_id', 'error', 'Select the property / site this bill belongs to');
   if (!data.po_id) add('po_id', 'warning', 'No purchase order linked: the bill will not be 3-way matched');
@@ -153,6 +158,9 @@ exports.create = async (req, res) => {
   const { data, vendor, po } = review;
   const clientId = vendor.client_id || getClientId(req);
   const subtotal = data.subtotal ?? round2(data.total_amount - data.tax_amount);
+  // Reverse charge (RCM): the company pays the GST itself, so the vendor is owed the subtotal only.
+  const reverseCharge = data.reverse_charge ?? Boolean(vendor.rcm_applicable);
+  const vendorTax = reverseCharge ? 0 : data.tax_amount;
   try {
     const invoice = await sequelize.transaction(async (transaction) => {
       const created = await Invoice.create({
@@ -164,8 +172,10 @@ exports.create = async (req, res) => {
         invoice_date: data.invoice_date,
         due_date: data.due_date,
         base_amount: subtotal,
-        gst_amount: data.tax_amount,
-        total_amount: round2(subtotal + data.tax_amount),
+        gst_amount: vendorTax,
+        total_amount: round2(subtotal + vendorTax),
+        reverse_charge: reverseCharge,
+        rcm_gst_amount: reverseCharge ? data.tax_amount : 0,
         // TDS only when the vendor has a TDS section (none set = no deduction).
         tds_rate_percent: vendor.tds_section_code ? Number(vendor.tds_rate_percent || 0) : 0,
         tds_section_code: vendor.tds_section_code || null,
@@ -281,6 +291,8 @@ exports.recordPayment = async (req, res) => {
         return { status: 409, message: `Payments can only be recorded on approved invoices (this one is ${STATUS_LABEL[invoice.status] || invoice.status})` };
       }
       if (invoice.payment_blocked) return { status: 409, message: `Payment is blocked: ${invoice.payment_block_reason || 'open exception'}` };
+      const blocked = await paymentBlockReason(invoice, req.user, transaction);
+      if (blocked) return { status: 409, message: blocked };
       const balance = balanceOf(invoice);
       if (round2(amount + discount) > balance + 0.009) {
         return { status: 422, message: discount ? `Payment plus discount (${round2(amount + discount)}) exceeds the balance due of ${balance}` : `Payment exceeds the balance due of ${balance}` };
@@ -308,6 +320,28 @@ exports.recordPayment = async (req, res) => {
   } catch (error) {
     return fail(res, 500, error.message || 'Could not record the payment');
   }
+};
+
+/** Payment advice for the vendor: preview (GET) and send after review (POST { subject, message }). */
+const adviceFail = (res, error) => {
+  if (error instanceof paymentAdvice.PaymentAdviceError) return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+  console.error('[payment-advice]', error.message);
+  return fail(res, 500, 'Could not prepare the payment advice');
+};
+
+exports.paymentAdvicePreview = async (req, res) => {
+  try {
+    const data = await paymentAdvice.preview({ invoiceId: req.params.id, tenantWhere: buildAdminWhere(req), userId: req.user.id });
+    return res.json({ success: true, data });
+  } catch (error) { return adviceFail(res, error); }
+};
+
+exports.paymentAdviceSend = async (req, res) => {
+  try {
+    const out = await paymentAdvice.send({ invoiceId: req.params.id, tenantWhere: buildAdminWhere(req), userId: req.user.id, subject: req.body?.subject, message: req.body?.message });
+    await recordAudit(req, { module: 'AP', entityType: 'INVOICE', entityId: out.invoice.id, action: 'AP_PAYMENT_ADVICE_SENT', note: `Payment advice emailed to ${out.to} from ${out.from}` });
+    return res.json({ success: true, message: `Payment advice sent to ${out.to}`, data: { sent_at: out.invoice.payment_advice_sent_at, sent_to: out.to } });
+  } catch (error) { return adviceFail(res, error); }
 };
 
 exports.STATUS_LABEL = STATUS_LABEL;

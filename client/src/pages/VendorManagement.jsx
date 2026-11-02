@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, Form, Input, InputNumber, Modal, Space, Table, Tag, message, Empty, Row, Col, Popconfirm, Typography, Statistic, Tooltip, Badge, Select, Upload, Alert, Descriptions } from 'antd';
+import { Button, Card, Form, Input, InputNumber, Modal, Space, Table, Tag, message, Empty, Row, Col, Popconfirm, Typography, Statistic, Tooltip, Badge, Select, Upload, Alert, Descriptions, Switch } from 'antd';
 import { TDS_SECTIONS, defaultTdsRate } from '../config/tds';
 import { Plus, RefreshCcw, Trash2, Building2, Edit2, ShieldCheck, Tags, Sparkles, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -559,6 +559,11 @@ const VendorManagement = () => {
               </Form.Item>
             </Col>
           </Row>
+
+          <Form.Item name="rcm_applicable" label="Reverse charge (RCM)" valuePropName="checked" initialValue={false}
+            extra="Turn on when we pay the GST on this vendor's bills instead of the vendor (unregistered vendor, legal services, GTA freight). Pre-fills on its invoices.">
+            <Switch />
+          </Form.Item>
 
           <Form.Item name="contact_person" label="Contact Person" extra={aiExtra('contact_person')}>
             <Input status={aiInputStatus('contact_person')} placeholder="Enter contact person name" />

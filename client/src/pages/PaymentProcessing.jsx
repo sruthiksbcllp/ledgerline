@@ -9,6 +9,7 @@ import {
   readApStore, vendorName, writeApStore,
 } from '../utils/apLedger';
 import TdsDeposit from '../components/finance/TdsDeposit';
+import { PaymentAdviceButton } from '../components/finance/PaymentAdvice';
 import { JournalEntryBlock } from '../components/finance/JournalEntries';
 
 const { Text } = Typography;
@@ -299,6 +300,7 @@ const PaymentProcessing = () => {
                     return <Tag color={v === 'PAID' ? 'success' : 'processing'}>{v || 'UNPAID'}</Tag>;
                   }
                 },
+                { title: 'Vendor email', key: 'advice', render: (_, row) => <PaymentAdviceButton size="small" invoice={row} onSent={() => load()} /> },
                 lastActionColumn('INVOICE', lastActions, { numberOf: (r) => r.invoice_number }),
               ]}
             />

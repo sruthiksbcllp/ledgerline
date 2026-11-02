@@ -70,7 +70,10 @@ class ThreeWayMatchService {
       ? toNumber(await PurchaseReturnItem.sum('quantity', { include: [{ model: PurchaseReturn, as: 'purchaseReturn', attributes: [], where: { grn_id: grn.id } }] }))
       : 0;
     const grnQty = grnItems.reduce((s, i) => s + toNumber(i.accepted_quantity || i.received_quantity), 0) - returned;
-    const invoiceAmount = toNumber(invoice.total_amount || (toNumber(invoice.base_amount) + toNumber(invoice.gst_amount)));
+    // PO lines are priced before GST, so compare the invoice before tax as well.
+    const invoiceAmount = invoice.base_amount != null
+      ? toNumber(invoice.base_amount)
+      : toNumber(invoice.total_amount) - toNumber(invoice.gst_amount);
     const poAmount = toNumber(po.total_amount);
 
     const qtyVariance = Math.abs(grnQty - poQty);

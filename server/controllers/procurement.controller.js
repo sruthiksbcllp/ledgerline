@@ -1402,7 +1402,7 @@ async function recordInvoice(body, req) {
 
     const baseAmount = Number(base_amount || 0);
     const gstAmountInput = Number(gst_amount || 0);
-    const total_amount = baseAmount + gstAmountInput;
+    let total_amount = baseAmount + gstAmountInput;
 
     // Fetch PO first to derive vendor_id and property_id
     const po = await PurchaseOrder.findByPk(po_id, { include: [{ model: PurchaseRequisition }] });
@@ -1448,7 +1448,8 @@ async function recordInvoice(body, req) {
     const { validate3WayMatch, validateSesMatch } = require('../utils/finance');
     const tolerancePercent = Number(body.tolerance_percent ?? process.env.THREE_WAY_AMOUNT_TOLERANCE_PCT ?? 5);
     const match = grn_id
-      ? await validate3WayMatch(po_id, grn_id, total_amount, {
+      // The PO is priced before GST, so the invoice is compared before tax too.
+      ? await validate3WayMatch(po_id, grn_id, baseAmount, {
           amountPercent: tolerancePercent,
           unitPricePercent: Number(process.env.THREE_WAY_UNIT_PRICE_TOLERANCE_PCT || 5),
           quantityPercent: Number(process.env.THREE_WAY_QTY_TOLERANCE_PCT || 0)
@@ -1474,7 +1475,15 @@ async function recordInvoice(body, req) {
         }
       }
     } catch (e) { /* fall back to org state */ }
-    const gstSplit = determineGstSplit({ vendorStateCode, supplyStateCode, gstAmount: gstAmountInput });
+    // Reverse charge (RCM): the company pays this GST to the government, not the vendor. Pre-filled
+    // from the vendor master; a vendor submitting its own invoice cannot change it.
+    const isVendorRole = String(req.user?.role || req.user?.role_code || '').toUpperCase() === 'VENDOR';
+    const reverseCharge = !isVendorRole && body.reverse_charge !== undefined && body.reverse_charge !== null && body.reverse_charge !== ''
+      ? body.reverse_charge === true || body.reverse_charge === 'true'
+      : Boolean(vendor.rcm_applicable);
+    const vendorGst = reverseCharge ? 0 : gstAmountInput;
+    total_amount = baseAmount + vendorGst;
+    const gstSplit = determineGstSplit({ vendorStateCode, supplyStateCode, gstAmount: vendorGst });
     const sameState = gstSplit.type === 'INTRA';
 
     // TDS only where a section applies: the vendor master's section, or the one chosen on the invoice
@@ -1506,8 +1515,10 @@ async function recordInvoice(body, req) {
       location_id: po.location_id || null, // location arc - from PO
       buyer_gstin: buyerGstin, // Phase D - place-of-supply GSTIN (flag-gated; null otherwise)
       base_amount: baseAmount,
-      gst_amount: gstAmountInput,
+      gst_amount: vendorGst,
       total_amount,
+      reverse_charge: reverseCharge,
+      rcm_gst_amount: reverseCharge ? gstAmountInput : 0,
       tds_amount,
       cgst_amount: gstSplit.cgst_amount,
       sgst_amount: gstSplit.sgst_amount,
@@ -1676,6 +1687,8 @@ exports.markInvoicePaid = async (req, res, next) => {
     if (invoice.status === 'PAID') {
       return success(res, invoice, 'Invoice is already marked as paid');
     }
+    const blocked = await require('../services/apPaymentControls').paymentBlockReason(invoice, req.user);
+    if (blocked) return error(res, blocked, 409);
 
     // Cash discount the vendor accepts at payment: settles that part of the balance without cash
     // (posted as Cr Discount received). The rest is paid from the bank.
@@ -1713,7 +1726,7 @@ exports.approveInvoiceForPayment = async (req, res, next) => {
     if (!invoice) throw new AppError('Invoice not found', 404);
     if (invoice.payment_blocked) return error(res, invoice.payment_block_reason || 'Invoice is payment-blocked', 400);
     if (invoice.matching_status === 'MISMATCHED') return error(res, 'Invoice has a 3-way match mismatch — resolve before approving for payment.', 400);
-    await invoice.update({ status: 'APPROVED_FOR_PAYMENT' });
+    await invoice.update({ status: 'APPROVED_FOR_PAYMENT', approved_by: req.user?.id || null, approved_at: new Date() });
     logActivity({ module: 'PROCUREMENT', action: 'INVOICE_APPROVED_FOR_PAYMENT', user_id: req.user?.id, client_id: req.user?.client_id, metadata: { invoice_id: invoice.id } }).catch(() => {});
     return success(res, invoice, 'Invoice approved for payment');
   } catch (error) { return next(error); }

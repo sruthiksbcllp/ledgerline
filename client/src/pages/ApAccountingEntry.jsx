@@ -5,6 +5,7 @@ import api from '../utils/api';
 import { getStoredUser } from '../utils/session';
 import PageHeader from '../components/PageHeader';
 import { plain, inr } from '../utils/apLedger';
+import GrirOpen from '../components/finance/GrirOpen';
 
 /**
  * AP Journal: the balanced journal the server posts for every AP event (goods receipt, service
@@ -33,6 +34,7 @@ const RULES = [
   { key: 'ses', event: 'Service receipt (SES approved)', debit: 'Contract services 6350 · Capital WIP 1500 (capex)', credit: 'GR/IR clearing 2015', ref: 'Blueprint step 5' },
   { key: 'inv', event: 'Vendor invoice (matched)', debit: 'GR/IR 2015 (excess to PPV 5010) · Input CGST 1411 / SGST 1412 / IGST 1410', credit: 'Accounts payable 2010 (net of TDS) · TDS payable 2160', ref: '2.1 – 2.6' },
   { key: 'nogrn', event: 'Invoice with no receipt', debit: 'Expense / asset directly · Input GST', credit: 'Accounts payable 2010 · TDS payable 2160', ref: '2.5' },
+  { key: 'rcm', event: 'Invoice under reverse charge (RCM)', debit: 'Input GST – RCM 1415 (cost account when not creditable)', credit: 'GST payable – RCM 2170 · the vendor is owed the value without GST', ref: '3.1' },
   { key: 'itc', event: 'GST not creditable', debit: 'GST added to the cost account', credit: '—', ref: '3.4' },
   { key: 'adv', event: 'Advance on a PO', debit: 'Advances to vendors 1300', credit: 'Operating bank 1010', ref: '4.1 – 4.2' },
   { key: 'advinv', event: 'Invoice on a PO with an advance', debit: 'As for the invoice', credit: 'Advances to vendors 1300 (advance adjusted) · Accounts payable 2010 reduced by it', ref: '4.2' },
@@ -218,6 +220,8 @@ const ApAccountingEntry = () => {
           scroll={{ x: 860 }}
         />
       </Card>
+
+      <GrirOpen cardStyle={contentCard} />
 
       <Card title="Account balances" style={{ ...contentCard, marginBottom: 16 }} styles={{ body: { padding: 0 } }}
         extra={balances ? <Text type={balances.balanced ? 'success' : 'danger'}>Debits {inr(balances.total_debit)} = Credits {inr(balances.total_credit)}</Text> : null}>

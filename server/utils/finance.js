@@ -4,6 +4,7 @@ const DEFAULT_TOLERANCES = {
   quantityPercent: Number(process.env.THREE_WAY_QTY_TOLERANCE_PCT || 0)
 };
 
+// invoice_amount is the invoice value before GST: PO and GRN values are priced before GST.
 exports.validate3WayMatch = async (po_id, grn_id, invoice_amount, options = {}) => {
   const { PurchaseOrder, GRN, PurchaseOrderItem, GRNItem } = require('../models');
   const tolerances = {
@@ -69,7 +70,7 @@ exports.validate3WayMatch = async (po_id, grn_id, invoice_amount, options = {}) 
   const allowedDiff = comparisonTotal * (tolerances.amountPercent / 100);
   const amountDiff = Math.abs(invTotal - comparisonTotal);
   if (amountDiff > allowedDiff) {
-    mismatches.push(`Invoice amount Rs.${invTotal} vs accepted/PO value Rs.${comparisonTotal} exceeds ${tolerances.amountPercent}% tolerance`);
+    mismatches.push(`Invoice amount Rs.${invTotal} (before tax) vs accepted/PO value Rs.${comparisonTotal} exceeds ${tolerances.amountPercent}% tolerance`);
   }
 
   return {
