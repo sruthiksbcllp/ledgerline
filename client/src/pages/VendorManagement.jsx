@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button, Card, Form, Input, InputNumber, Modal, Space, Table, Tag, message, Empty, Row, Col, Popconfirm, Typography, Statistic, Tooltip, Badge, Select, Upload, Alert, Descriptions, Switch } from 'antd';
 import { TDS_SECTIONS, defaultTdsRate } from '../config/tds';
 import { Plus, RefreshCcw, Trash2, Building2, Edit2, ShieldCheck, Tags, Sparkles, BadgeCheck } from 'lucide-react';
@@ -90,6 +90,23 @@ const VendorManagement = () => {
 
   const resetAutoFill = () => { setAiFields({}); setAiSummary(null); };
 
+  // Paste a screenshot (Ctrl+V) while the Add Vendor form is open to auto-fill from it.
+  const autoFillRef = useRef(null);
+  useEffect(() => {
+    if (!open || editingVendor) return undefined;
+    const onPaste = (e) => {
+      const item = Array.from(e.clipboardData?.items || []).find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+      if (!item || aiLoading) return;
+      const blob = item.getAsFile();
+      if (!blob) return;
+      e.preventDefault();
+      const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      autoFillRef.current?.(new File([blob], `pasted-screenshot.${ext}`, { type: blob.type }));
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [open, editingVendor, aiLoading]);
+
   const autoFillFromDocument = async (file) => {
     const okType = AI_FILE_TYPES.includes(file.type) || /\.(pdf|jpe?g|png|gif|webp)$/i.test(file.name || '');
     if (!okType) {
@@ -108,8 +125,9 @@ const VendorManagement = () => {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 180000
       });
-      const { is_vendor_document: isVendorDoc, fields = {} } = res?.data?.data || {};
-      if (!isVendorDoc) {
+      const { fields = {} } = res?.data?.data || {};
+      // Fill whatever was found, even from a screenshot that shows only a few details.
+      if (!AI_FIELD_KEYS.some((key) => String(fields[key]?.value || '').trim())) {
         message.warning('No vendor details were found in this file. Fill the form manually.');
         return;
       }
@@ -150,6 +168,7 @@ const VendorManagement = () => {
       setAiLoading(false);
     }
   };
+  autoFillRef.current = autoFillFromDocument;
 
   // Highlight for a field the AI filled with low/medium confidence or could not find.
   const aiInputStatus = (name) => (aiFields[name] ? 'warning' : undefined);
@@ -451,11 +470,11 @@ const VendorManagement = () => {
               beforeUpload={(file) => { autoFillFromDocument(file); return Upload.LIST_IGNORE; }}
             >
               <Button icon={<Sparkles size={16} />} loading={aiLoading}>
-                {aiLoading ? 'Reading document…' : 'Auto-fill from document'}
+                {aiLoading ? 'Reading…' : 'Auto-fill from document or screenshot'}
               </Button>
             </Upload>
             <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
-              Upload a GST certificate, letterhead, cancelled cheque or registration form (PDF or image, up to 10 MB). You can review and edit every field before saving.
+              Upload a PDF, photo or screenshot (GST certificate, invoice, cancelled cheque, visiting card, email signature, WhatsApp message, website page…), or press Ctrl+V to paste a screenshot. Up to 10 MB. You can review and edit every field before saving.
             </Text>
             {aiSummary && (
               <Alert
