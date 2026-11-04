@@ -39,7 +39,18 @@ async function buyerBranding(rfq) {
   return { buyerName: name || 'Procurement', buyerGst: gst };
 }
 
-const dueText = (rfq) => (rfq.due_date ? new Date(rfq.due_date).toDateString() : 'the earliest');
+const dueDate = (rfq) => (rfq.due_date
+  ? new Date(rfq.due_date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+  : null);
+const dueText = (rfq) => dueDate(rfq) || 'the earliest';
+
+/** Fixed due-date box under the RFQ heading, so the deadline shows even if the message is edited. */
+const dueBanner = (rfq) => {
+  const due = dueDate(rfq);
+  return due
+    ? `<div style="margin:8px 0 14px;padding:10px 14px;background:#FFF7E6;border-left:4px solid #D97706;font-size:14px;">Quotation due date: <strong>${esc(due)}</strong></div>`
+    : '';
+};
 
 const defaultSubject = (rfq, buyerName) => `Request for Quotation ${rfq.rfq_number} - ${buyerName}`;
 
@@ -73,7 +84,8 @@ function renderInvite({ rfq, buyerName, buyerGst, greetingName, message }) {
   return `<div style="font-family:Arial,sans-serif;color:#222;max-width:680px;">`
     + `<h2 style="color:#1F3A5F;margin:0 0 4px;">${esc(buyerName)}</h2>`
     + (buyerGst ? `<div style="color:#666;font-size:12px;">GSTIN: ${esc(buyerGst)}</div>` : '')
-    + `<h3 style="color:#1F3A5F;">Request for Quotation - ${esc(rfq.rfq_number)}</h3>`
+    + `<h3 style="color:#1F3A5F;margin-bottom:4px;">Request for Quotation - ${esc(rfq.rfq_number)}</h3>`
+    + dueBanner(rfq)
     + `<p>Dear ${esc(greetingName || 'Sir/Madam')},</p>`
     + body.join('')
     + '<p style="color:#999;font-size:11px;">Sent via LedgerLine procurement.</p>'

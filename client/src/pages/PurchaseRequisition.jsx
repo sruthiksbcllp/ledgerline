@@ -7,6 +7,7 @@ import { getStoredUser, hasPerm } from '../utils/session';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
+import RequesterHistory from '../components/procurement/RequesterHistory';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -548,7 +549,7 @@ const PurchaseRequisition = () => {
               <Descriptions.Item label="Requested By">
                 {viewRecord.RequestedBy ? ((viewRecord.RequestedBy.first_name || '') + ' ' + (viewRecord.RequestedBy.last_name || '')).trim() || viewRecord.RequestedBy.username : viewRecord.Requestor ? ((viewRecord.Requestor.first_name || '') + ' ' + (viewRecord.Requestor.last_name || '')).trim() || viewRecord.Requestor.username : '-'}
               </Descriptions.Item>
-              <Descriptions.Item label="Requestor Name">{viewRecord.requestor_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Requestor Name">{viewRecord.requestor_name || '-'}<RequesterHistory prId={viewRecord.id} /></Descriptions.Item>
               <Descriptions.Item label="Department">{viewRecord.Department?.dept_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Property">{viewRecord.Property?.property_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Asset">{viewRecord.Asset?.asset_name || typedAssetName(viewRecord) || '-'}</Descriptions.Item>

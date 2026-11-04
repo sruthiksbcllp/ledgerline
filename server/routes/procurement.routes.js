@@ -62,6 +62,7 @@ const { requireRead } = require('../middleware/dataAccess.middleware');
 router.get('/pr', requireRead('PR'), activityLog('PROCUREMENT', 'MODULE'), asyncHandler(procurementController.getPRs));
 router.get('/pr/:id', requireRead('PR'), asyncHandler(procurementController.getPRById));
 router.get('/pr/:id/history', requireRead('PR'), asyncHandler(procurementController.getPRApprovalHistory));
+router.get('/pr/:id/requester-history', requireRead('PR'), asyncHandler(procurementController.getRequesterHistory)); // earlier PRs from the same requester
 router.post('/pr', checkPermission('PR', 'CREATE'), blockWhenFinancialYearClosed, asyncHandler(procurementController.createPR));
 router.put('/pr/:id', checkPermission('PR', 'EDIT'), blockWhenFinancialYearClosed, asyncHandler(procurementController.updatePR));
 router.put('/pr/:id/approve', rbacMiddleware(['MANAGER', 'DIRECTOR_CFO', 'FINANCE']), blockWhenFinancialYearClosed, asyncHandler(procurementController.approvePR));

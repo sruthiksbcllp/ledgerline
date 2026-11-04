@@ -407,6 +407,66 @@ exports.rejectPR = async (req, res, next) => {
   }
 };
 
+/**
+ * Earlier PRs from the same requester, for the approver to see before deciding. The requester is the
+ * typed requestor name when there is one (the person who actually needs it), otherwise the user who
+ * raised the PR.
+ */
+exports.getRequesterHistory = async (req, res, next) => {
+  try {
+    const pr = await findOneTenanted(PurchaseRequisition, req.params.id, req, {});
+    if (!pr || !(await canSeeRow(req, 'PR', pr, { owner: 'requestor_id' }))) throw new AppError('PR not found', 404);
+
+    const name = String(pr.requestor_name || '').trim();
+    const who = name
+      ? sequelize.where(sequelize.fn('LOWER', sequelize.fn('TRIM', sequelize.col('PurchaseRequisition.requestor_name'))), name.toLowerCase())
+      : pr.requested_by_user_id ? { requested_by_user_id: pr.requested_by_user_id }
+        : pr.requestor_id ? { requestor_id: pr.requestor_id } : null;
+    if (!who) return success(res, { requester: '', summary: { count: 0, total: 0, approved: 0, rejected: 0, pending: 0 }, requests: [] });
+
+    const rows = await PurchaseRequisition.findAll({
+      where: { [Op.and]: [buildAdminWhere(req), { id: { [Op.ne]: pr.id } }, who] },
+      include: [
+        { model: PurchaseRequisitionItem, as: 'items', attributes: ['item_name', 'quantity', 'unit', 'estimated_cost'] },
+        { model: Department, attributes: ['dept_name'], required: false },
+        { model: User, as: 'RequestedBy', attributes: ['first_name', 'last_name', 'username'], required: false }
+      ],
+      order: [['createdAt', 'DESC']],
+      limit: 50
+    });
+    const requests = rows.map((r) => {
+      const items = r.items || [];
+      const fromItems = items.reduce((sum, i) => sum + Number(i.quantity || 0) * Number(i.estimated_cost || 0), 0);
+      return {
+        id: r.id,
+        pr_number: r.pr_number,
+        created_at: r.createdAt,
+        status: r.status,
+        type: r.type,
+        department: r.Department?.dept_name || '',
+        total_cost: Number(r.total_cost) > 0 ? Number(r.total_cost) : fromItems,
+        justification: r.justification || '',
+        items: items.map((i) => ({ item_name: i.item_name, quantity: Number(i.quantity || 0), unit: i.unit || '' }))
+      };
+    });
+    const isPending = (s) => ['DRAFT', 'SUBMITTED', 'PENDING_APPROVAL', 'IN_APPROVAL', 'PENDING_CONFIGURATION'].includes(s);
+    const raisedBy = pr.requested_by_user_id ? await User.findByPk(pr.requested_by_user_id, { attributes: ['first_name', 'last_name', 'username'] }) : null;
+    return success(res, {
+      requester: name || [raisedBy?.first_name, raisedBy?.last_name].filter(Boolean).join(' ') || raisedBy?.username || '',
+      summary: {
+        count: requests.length,
+        total: Math.round(requests.reduce((sum, r) => sum + r.total_cost, 0) * 100) / 100,
+        approved: requests.filter((r) => ['APPROVED', 'PO_CREATED'].includes(r.status)).length,
+        rejected: requests.filter((r) => r.status === 'REJECTED').length,
+        pending: requests.filter((r) => isPending(r.status)).length
+      },
+      requests
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.getPRApprovalHistory = async (req, res, next) => {
   try {
     // FIX: was no tenant filter — any user could view any PR's approval trail by guessing ID
