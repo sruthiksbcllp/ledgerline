@@ -24,6 +24,36 @@ const STATUS_COLOR = {
   PO_CREATED: 'cyan'
 };
 
+// Finds the in-house stock item a PR line asks for, so the requester can take it from the store instead.
+const normName = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const findInStock = (stock, name) => {
+  const typed = normName(name);
+  if (typed.length < 3) return null;
+  const words = typed.split(' ').filter((w) => w.length >= 3);
+  return stock.find((s) => {
+    const held = normName(s.item_name);
+    return held.includes(typed) || typed.includes(held) || (words.length > 0 && words.every((w) => held.includes(w)));
+  }) || null;
+};
+
+/** Shown under a PR line when the store already holds the item. */
+const StockHint = ({ stock, line, onOpen }) => {
+  const match = findInStock(stock, line?.item_name);
+  if (!match || match.on_hand <= 0) return null;
+  const wanted = Number(line?.quantity || 0);
+  const enough = wanted > 0 && match.on_hand >= wanted;
+  const where = match.locations.filter((l) => l.quantity > 0).map((l) => l.location_name).join(', ');
+  return (
+    <div style={{ margin: '-4px 0 10px', padding: '6px 10px', borderRadius: 8, fontSize: 12, background: enough ? 'rgba(22,163,74,0.08)' : 'rgba(217,119,6,0.08)', border: `1px solid ${enough ? 'rgba(22,163,74,0.35)' : 'rgba(217,119,6,0.35)'}` }}>
+      <Text style={{ fontSize: 12 }}>
+        <b>In-house stock:</b> {match.on_hand} {match.unit} of {match.item_name}{where ? ` at ${where}` : ''}.{' '}
+        {enough ? 'Enough in the store, so it can be issued instead of bought.' : `Not enough for ${wanted}, so raise the PR only for the rest.`}
+      </Text>{' '}
+      <Button type="link" size="small" style={{ padding: 0, height: 'auto', fontSize: 12 }} onClick={() => onOpen(match.item_name)}>View in stock</Button>
+    </div>
+  );
+};
+
 const typedAssetName = (record) => {
   const line = String(record?.item_description || '').split('\n').find((row) => row.startsWith('Asset: '));
   return line ? line.slice(7).trim() : '';
@@ -39,9 +69,11 @@ const PurchaseRequisition = () => {
   const [assets, setAssets] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [locations, setLocations] = useState([]); // CR-P05
+  const [stock, setStock] = useState([]); // in-house stock, checked against each PR line
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
+  const watchedItems = Form.useWatch('items', form);
   const [viewRecord, setViewRecord] = useState(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [approveId, setApproveId] = useState(null);
@@ -374,7 +406,7 @@ const PurchaseRequisition = () => {
         actions={
           <Space wrap size={8}>
             <Button icon={<RefreshCcw size={16} />} onClick={load} loading={loading}>Refresh</Button>
-            {hasPerm(getStoredUser(), 'PR', 'ADD') && <Button type="primary" icon={<Plus size={16} />} onClick={async () => { setOpen(true); try { const vnd = await api.get('/masters/vendors'); setVendors(normalizeResponse(vnd?.data)); } catch { /* keep the vendors already loaded */ } }} style={primaryBtn}>New PR</Button>}
+            {hasPerm(getStoredUser(), 'PR', 'ADD') && <Button type="primary" icon={<Plus size={16} />} onClick={async () => { setOpen(true); api.get('/in-house-stock').then((r) => setStock(r?.data?.data || [])).catch(() => {}); try { const vnd = await api.get('/masters/vendors'); setVendors(normalizeResponse(vnd?.data)); } catch { /* keep the vendors already loaded */ } }} style={primaryBtn}>New PR</Button>}
           </Space>
         }
       />
@@ -458,7 +490,8 @@ const PurchaseRequisition = () => {
             {(fields, { add, remove }) => (
               <>
                 {fields.map(({ key, name, ...rest }) => (
-                  <div key={key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.4fr) 84px minmax(0,1fr) minmax(0,1.2fr) 34px', gap: '0 10px', alignItems: 'start' }}>
+                  <React.Fragment key={key}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.4fr) 84px minmax(0,1fr) minmax(0,1.2fr) 34px', gap: '0 10px', alignItems: 'start' }}>
                     <Form.Item {...rest} name={[name, 'item_name']} rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 10 }}>
                       <Input placeholder="e.g., Office Chair" />
                     </Form.Item>
@@ -473,6 +506,8 @@ const PurchaseRequisition = () => {
                     </Form.Item>
                     <Button danger type="text" icon={<Trash2 size={16} />} onClick={() => remove(name)} disabled={fields.length === 1} style={{ marginTop: 2, padding: 0 }} />
                   </div>
+                  <StockHint stock={stock} line={watchedItems?.[name]} onOpen={(itemName) => navigate(`/procurement/requisition/in-house-stock?q=${encodeURIComponent(itemName)}`)} />
+                  </React.Fragment>
                 ))}
                 <Button type="dashed" onClick={() => add({ quantity: 1, unit: 'Nos', estimated_cost: 0 })} icon={<Plus size={16} />} style={{ width: '100%', marginBottom: 12 }}>Add item</Button>
               </>

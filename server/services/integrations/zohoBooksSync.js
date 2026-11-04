@@ -420,6 +420,99 @@ async function syncAll(clientId) {
   return out;
 }
 
+// ── Vendors from Zoho Books ──────────────────────────────────────────────────
+const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const vendorRef = (name, gstin) => `${name} | GST ${String(gstin || '').trim().toUpperCase() || 'none'}`;
+
+/** Every active vendor contact in the organisation (Zoho returns 200 a page). */
+async function zohoVendors(row) {
+  const out = [];
+  for (let page = 1; page <= 100; page += 1) {
+    const res = await zoho(row, 'GET', `/contacts?contact_type=vendor&filter_by=Status.Active&page=${page}&per_page=200`);
+    out.push(...(res.contacts || []));
+    if (!res.page_context?.has_more_page) break;
+  }
+  return out.filter((c) => !c.status || c.status === 'active');
+}
+
+/**
+ * Brings the organisation's Zoho Books vendors into Vendor Master so they can be used in PRs, RFQs
+ * and POs. Read-only on Zoho. A Zoho vendor already in LedgerLine (same GSTIN, or same name) is linked,
+ * not duplicated or overwritten; new ones are created ACTIVE but unverified, so Compliance still checks
+ * them before any payment. Each is linked to its Zoho contact, so later bills go to the same contact.
+ * @param {{ dryRun?: boolean, userId?: number }} options dryRun only counts what would happen
+ */
+async function importVendors(clientId, { dryRun = false } = {}) {
+  const row = await connectionFor(clientId);
+  const contacts = await zohoVendors(row);
+  const { Vendor, IntegrationLink } = M();
+  const locals = await Vendor.findAll({ where: { client_id: clientId }, attributes: ['id', 'vendor_name', 'gst_number', 'pan_number'] });
+  const links = await IntegrationLink.findAll({ where: { client_id: clientId, provider: PROVIDER, entity_type: 'VENDOR' }, attributes: ['local_id', 'external_id'] });
+  const linkedZoho = new Set(links.filter((l) => l.external_id).map((l) => String(l.external_id)));
+  const linkedLocal = new Set(links.filter((l) => l.external_id).map((l) => l.local_id));
+  const byGstin = new Map(locals.filter((v) => v.gst_number).map((v) => [String(v.gst_number).trim().toUpperCase(), v]));
+  const byName = new Map(locals.map((v) => [normName(v.vendor_name), v]));
+
+  const out = { total: contacts.length, already_linked: 0, matched: [], created: [], failed: [] };
+  for (const c of contacts) {
+    const zohoId = String(c.contact_id);
+    const name = String(c.contact_name || c.company_name || '').trim();
+    if (!name) continue;
+    if (linkedZoho.has(zohoId)) { out.already_linked += 1; continue; }
+    const gstin = /^[0-9A-Z]{15}$/.test(String(c.gst_no || '').trim().toUpperCase()) ? String(c.gst_no).trim().toUpperCase() : '';
+    const match = (gstin && byGstin.get(gstin)) || byName.get(normName(name));
+
+    if (match) {
+      // Same vendor already in LedgerLine: link it (LedgerLine keeps its own details).
+      if (linkedLocal.has(match.id)) { out.already_linked += 1; continue; }
+      out.matched.push(name);
+      if (!dryRun) {
+        await IntegrationLink.upsert({
+          client_id: clientId, provider: PROVIDER, entity_type: 'VENDOR', local_id: match.id,
+          external_id: zohoId, external_ref: vendorRef(match.vendor_name, match.gst_number), status: 'SYNCED', last_error: null, synced_at: new Date()
+        });
+      }
+      linkedLocal.add(match.id);
+      continue;
+    }
+
+    out.created.push(name);
+    if (dryRun) continue;
+    try {
+      const pan = String(c.pan_no || (gstin ? gstin.slice(2, 12) : '')).trim().toUpperCase();
+      // PAN is unique across vendors; leave it out rather than fail when another vendor holds it.
+      const panFree = /^[A-Z]{5}\d{4}[A-Z]$/.test(pan) && !(await Vendor.findOne({ attributes: ['id'], where: { pan_number: pan } }));
+      const a = c.billing_address || {};
+      const address = [a.address, a.street2, a.city, a.state, a.zip].filter(Boolean).join(', ');
+      const vendor = await Vendor.create({
+        client_id: clientId,
+        vendor_name: name,
+        contact_person: [c.first_name, c.last_name].filter(Boolean).join(' ') || null,
+        email: c.email || null,
+        phone: c.phone || c.mobile || null,
+        address: address || null,
+        gst_number: gstin || null,
+        gst_registered_state_code: gstin ? gstin.slice(0, 2) : null,
+        pan_number: panFree ? pan : null,
+        status: 'ACTIVE',
+        verification_status: 'PENDING',
+        verification_remarks: 'Imported from Zoho Books: verify GSTIN, PAN and bank details before payment'
+      });
+      await IntegrationLink.upsert({
+        client_id: clientId, provider: PROVIDER, entity_type: 'VENDOR', local_id: vendor.id,
+        external_id: zohoId, external_ref: vendorRef(name, gstin), status: 'SYNCED', last_error: null, synced_at: new Date()
+      });
+      if (gstin) byGstin.set(gstin, vendor);
+      byName.set(normName(name), vendor);
+      linkedLocal.add(vendor.id);
+    } catch (e) {
+      out.created.pop();
+      out.failed.push(`${name}: ${e.message}`);
+    }
+  }
+  return out;
+}
+
 /** Counts and the latest failures, for the Zoho Books card. */
 async function status(clientId) {
   const links = await M().IntegrationLink.findAll({ where: { client_id: clientId, provider: PROVIDER }, order: [['updated_at', 'DESC']] });
@@ -506,4 +599,4 @@ function install(db) {
   }
 }
 
-module.exports = { install, syncVendor, syncBill, syncPayment, syncTdsDeposit, syncAll, status, mapping, saveSettings, stateOf };
+module.exports = { install, syncVendor, syncBill, syncPayment, syncTdsDeposit, syncAll, importVendors, status, mapping, saveSettings, stateOf };

@@ -39,6 +39,7 @@ const ManageServiceProviders = lazy(() => import('./pages/ManageServiceProviders
 const AddServiceProvider = lazy(() => import('./pages/AddServiceProvider'));
 const VendorManagement = lazy(() => import('./pages/VendorManagement'));
 const PurchaseRequisition = lazy(() => import('./pages/PurchaseRequisition'));
+const InHouseStock = lazy(() => import('./pages/InHouseStock'));
 const PurchaseOrder = lazy(() => import('./pages/PurchaseOrder'));
 const GRNManagement = lazy(() => import('./pages/GRNManagement'));
 const ServiceEntrySheets = lazy(() => import('./pages/ServiceEntrySheets'));
@@ -158,6 +159,7 @@ function App() {
               {/* Procurement */}
               <Route path="/procurement/requisitions" element={<PurchaseRequisition />} />
               <Route path="/procurement/requisition" element={<PurchaseRequisition />} />
+              <Route path="/procurement/requisition/in-house-stock" element={<InHouseStock />} />
               <Route path="/procurement/requisitions/edit/:id" element={<PurchaseRequisition />} />
               <Route path="/procurement/quotations" element={<QuotationManagement />} />
               <Route path="/procurement/rfq" element={<RfqManagement />} />

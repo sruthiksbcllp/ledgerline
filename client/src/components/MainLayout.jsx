@@ -346,7 +346,14 @@ const MainLayout = ({ children }) => {
       label: 'Accounts Payable',
       hidden: (!canSeeProcurement && !canSeeApAutomation) || (features && features.PROCUREMENT_MODULE === false),
       children: [
-        { key: '/procurement/requisition', icon: <FileText size={16} />, label: 'Requisition (PR)', hidden: !canSeeProcurement },
+        {
+          // Check the store first: stock already in-house is issued to the requester instead of raising a PR.
+          key: 'requisition-group', icon: <FileText size={16} />, label: 'Requisition (PR)', hidden: !canSeeProcurement,
+          children: [
+            { key: '/procurement/requisition', icon: <FileText size={14} />, label: 'Requisitions' },
+            { key: '/procurement/requisition/in-house-stock', icon: <Boxes size={14} />, label: 'In-house Stock' },
+          ]
+        },
         { key: '/procurement/rfq', icon: <FileText size={16} />, label: 'RFQ (Sourcing)', hidden: !canSeeProcurement },
         { key: '/procurement/quotations', icon: <IndianRupee size={16} />, label: 'Quotations', hidden: !canSeeProcurement },
         { key: '/procurement/purchase-orders', icon: <ShoppingCart size={16} />, label: 'Purchase Orders (PO)', hidden: !canSeeProcurement },

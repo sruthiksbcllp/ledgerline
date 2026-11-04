@@ -28,6 +28,10 @@ module.exports = (sequelize, DataTypes) => {
     supplier_id: DataTypes.INTEGER,
     reference_number: DataTypes.STRING, // Invoice No, Issue Slip No, etc.
     notes: DataTypes.TEXT,
+    // Issues from in-house stock: who received the item, their department, and the PR it replaces
+    issued_to: DataTypes.STRING,
+    issued_department: DataTypes.STRING,
+    pr_id: DataTypes.INTEGER,
     created_by: DataTypes.INTEGER
   }, {
     sequelize,

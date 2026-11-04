@@ -51,3 +51,24 @@ exports.syncNow = async (req, res) => {
     return res.json({ success: true, message: 'Sent to Zoho Books', data: link });
   } catch (e) { return fail(res, e); }
 };
+
+/** Vendors in Zoho Books that would be imported into Vendor Master (nothing is saved). */
+exports.vendorImportPreview = async (req, res) => {
+  try {
+    const out = await sync.importVendors(clientIdOf(req), { dryRun: true });
+    return res.json({ success: true, data: { total: out.total, already_linked: out.already_linked, to_link: out.matched, to_create: out.created } });
+  } catch (e) { return fail(res, e); }
+};
+
+/** Brings Zoho Books vendors into Vendor Master so PRs, RFQs and POs can use them. */
+exports.vendorImport = async (req, res) => {
+  try {
+    const out = await sync.importVendors(clientIdOf(req));
+    await recordAudit(req, { module: 'INTEGRATIONS', entityType: 'VENDOR', entityId: null, action: 'ZOHO_BOOKS_VENDOR_IMPORT', note: `Imported ${out.created.length} vendor(s) from Zoho Books, linked ${out.matched.length}` });
+    return res.json({
+      success: true,
+      message: `${out.created.length} vendor(s) added from Zoho Books${out.matched.length ? `, ${out.matched.length} linked to existing vendors` : ''}${out.failed.length ? `, ${out.failed.length} failed` : ''}`,
+      data: out
+    });
+  } catch (e) { return fail(res, e); }
+};

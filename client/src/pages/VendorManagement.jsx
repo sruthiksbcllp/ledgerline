@@ -4,6 +4,7 @@ import { TDS_SECTIONS, defaultTdsRate } from '../config/tds';
 import { Plus, RefreshCcw, Trash2, Building2, Edit2, ShieldCheck, Tags, Sparkles, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
+import ZohoVendorImport from '../components/finance/ZohoVendorImport';
 import { getStoredUser, hasPerm } from '../utils/session';
 import { normalizeResponse } from '../utils/apiNormalizer';
 
@@ -357,6 +358,7 @@ const VendorManagement = () => {
             <Badge count={pendingCount} offset={[-2, 0]}>
               <Button icon={<ShieldCheck size={16} />} onClick={() => navigate('/procurement/vendor-approvals')}>Approvals</Button>
             </Badge>
+            <ZohoVendorImport onDone={() => load(true)} />
             {hasPerm(getStoredUser(), 'VENDOR', 'ADD') && <Button icon={<Plus size={16} />} type="primary" onClick={openAdd}>Add Vendor</Button>}
           </Space>
         </Row>

@@ -170,6 +170,7 @@ app.use('/api/doa-config', require('./routes/doaConfig.routes')); // Phase 2 - D
 // Master Data
 app.use('/api/masters', masterRoutes);
 app.use('/api/items', itemRoutes);
+app.use('/api/in-house-stock', require('./routes/inHouseStock.routes')); // store stock checked before raising a PR, and issues to requesters
 // IMPORTANT: mount specific /api/system/* sub-routes BEFORE the catch-all /api/system
 // (systemRoutes applies requireProviderAdmin which would block these)
 app.use('/api/system/activity-logs', require('./routes/activity_logs.routes'));

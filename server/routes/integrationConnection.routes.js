@@ -29,5 +29,8 @@ router.get('/zoho_books/status', asyncHandler(zoho.status));
 router.get('/zoho_books/mapping', asyncHandler(zoho.mapping));
 router.put('/zoho_books/settings', asyncHandler(zoho.saveSettings));
 router.post('/zoho_books/sync', asyncHandler(zoho.syncNow));
+// Vendors from Zoho Books into Vendor Master (read-only on Zoho).
+router.get('/zoho_books/vendors/preview', asyncHandler(zoho.vendorImportPreview));
+router.post('/zoho_books/vendors/import', asyncHandler(zoho.vendorImport));
 
 module.exports = router;
