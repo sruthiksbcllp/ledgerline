@@ -94,7 +94,7 @@ exports.getRfqById = async (req, res) => {
       where,
       include: [
         { model: RfqItem, as: 'items' },
-        { model: RfqVendor, as: 'vendors', include: [{ model: Vendor, as: 'vendor', attributes: ['id', 'vendor_name', 'email'] }, { model: Quotation, as: 'response', required: false, attributes: ['id', 'quotation_number', 'net_amount', 'status'] }] }
+        { model: RfqVendor, as: 'vendors', include: [{ model: Vendor, as: 'vendor', attributes: ['id', 'vendor_name', 'email', 'contact_person', 'phone'] }, { model: Quotation, as: 'response', required: false, attributes: ['id', 'quotation_number', 'net_amount', 'status'] }] }
       ]
     });
     if (!rfq) return fail(res, 'RFQ not found', 404);

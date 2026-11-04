@@ -10,6 +10,7 @@ import VendorEmailReview, { VendorEmailStatusTag } from '../components/procureme
 import ConnectEmailModal from '../components/settings/ConnectEmailModal';
 import RfqRepliesDrawer from '../components/procurement/RfqRepliesDrawer';
 import RfqEmailReviewModal from '../components/procurement/RfqEmailReviewModal';
+import NoReplyVendors from '../components/procurement/NoReplyVendors';
 
 const INVITE_COLOR = { PENDING: 'default', SENT: 'blue', RESPONDED: 'green', DECLINED: 'red' };
 
@@ -239,6 +240,15 @@ export default function RfqDetail() {
             <Button icon={<Inbox size={14} />} loading={repliesState.loading} onClick={() => setRepliesOpen(true)}>
               Vendor replies{replies.length ? ` (${replies.length})` : ''}
             </Button>
+          )}
+          {rfq && (
+            <NoReplyVendors
+              rfq={rfq}
+              replies={replies}
+              repliesChecked={repliesState.allowed && !repliesState.error}
+              sending={sending}
+              onResend={(vendorIds) => setReview({ resend: true, vendorIds })}
+            />
           )}
           <Button icon={<RefreshCcw size={14} />} onClick={() => { load(); loadVendors(); loadReplies(); }}>Refresh</Button>
           <Button onClick={() => navigate('/procurement/rfq')}>Back</Button>
