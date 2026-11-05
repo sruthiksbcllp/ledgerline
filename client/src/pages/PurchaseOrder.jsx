@@ -7,6 +7,8 @@ import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import PoStatusSummary from '../components/procurement/PoStatusSummary';
+import PoFundButton from '../components/procurement/PoFundButton';
+import PoFundImpact from '../components/procurement/PoFundImpact';
 import { PO_GROUPS, poAgeing, poGroupOf, statusLabel } from '../constants/poStatus';
 
 import DateRangeFilter from '../components/base/DateRangeFilter';
@@ -372,6 +374,7 @@ const PurchaseOrder = () => {
         subtitle={filtersOn ? `${filteredPos.length} of ${pos.length} records` : pos.length + ' records'}
         actions={(
           <Space>
+            <PoFundButton refreshKey={pos} />
             <Button icon={<RefreshCcw size={16} />} loading={loading} onClick={fetchData}>Refresh</Button>
             <Button icon={<Plus size={16} />} type="primary" onClick={() => setOpen(true)}>Generate PO</Button>
           </Space>
@@ -525,6 +528,7 @@ const PurchaseOrder = () => {
             )}
           </div>
 
+          <PoFundImpact amount={poTotal} style={{ marginBottom: 16 }} />
           <Form.Item name="approval_comment" label="Comments for approver">
             <Input.TextArea rows={3} placeholder="Any note to include in the approval email sent to the approver" />
           </Form.Item>
@@ -541,6 +545,7 @@ const PurchaseOrder = () => {
       </Modal>
 
       <Modal title="Approve Purchase Order" open={!!approveId} onCancel={() => setApproveId(null)} onOk={handleApprove} okText="Approve" okButtonProps={{ style: { background: 'var(--color-success)', border: 'none' } }}>
+        <PoFundImpact approving amount={pos.find((p) => p.id === approveId)?.total_amount} style={{ marginBottom: 12 }} />
         <Input.TextArea rows={3} placeholder="Add approval comments" value={comments} onChange={(e) => setComments(e.target.value)} />
       </Modal>
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Card, Empty, Row, Space, Table, Tag, Typography, message, Modal, Descriptions } from 'antd';
-import { RefreshCcw, PackageCheck, Eye, Undo2 } from 'lucide-react';
+import { RefreshCcw, PackageCheck, Eye, Undo2, ClipboardCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
@@ -8,6 +8,8 @@ import GRNDrawer from '../components/procurement/GRNDrawer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
 import ReturnToVendorModal from '../components/procurement/ReturnToVendorModal';
+import GoodsInspectionModal from '../components/procurement/GoodsInspectionModal';
+import { GIR_RESULT } from '../constants/gir';
 import { getStoredUser } from '../utils/session';
 
 const { Title, Text } = Typography;
@@ -30,6 +32,8 @@ const GRNManagement = () => {
   const [viewJournals, setViewJournals] = useState([]); // AP journal entries posted for the GRN
   const [viewReturns, setViewReturns] = useState([]); // returns to vendor recorded on the GRN
   const [returnOpen, setReturnOpen] = useState(false);
+  const [girs, setGirs] = useState({}); // grn_id -> goods inspection report summary
+  const [inspectGrn, setInspectGrn] = useState(null);
   const canReturn = RETURN_ROLES.includes(String(getStoredUser()?.role || '').toUpperCase());
 
   const loadReturns = (grnId) => api.get('/purchase-returns', { params: { grn_id: grnId } })
@@ -59,6 +63,9 @@ const GRNManagement = () => {
       ]);
       setApprovedPOs(normalizeResponse(poRes?.data));
       setGrns(normalizeResponse(grnRes?.data));
+      api.get('/goods-inspections')
+        .then((r) => setGirs(Object.fromEntries(normalizeResponse(r?.data).map((g) => [g.grn_id, g]))))
+        .catch(() => setGirs({}));
     } catch (err) {
       message.error(err?.response?.data?.message || 'Failed to load GRN data');
     } finally {
@@ -111,6 +118,19 @@ const GRNManagement = () => {
             <Tag color={inv.matching_status === 'MISMATCHED' ? 'error' : inv.status === 'PAID' ? 'success' : 'processing'}>
               {inv.matching_status === 'MISMATCHED' ? 'Match exception' : inv.status}
             </Tag>
+          </Space>
+        );
+      }
+    },
+    {
+      title: 'Inspection (GIR)', key: 'gir',
+      render: (_, r) => {
+        const g = girs[r.id];
+        if (!g) return <Button size="small" icon={<ClipboardCheck size={14} />} onClick={() => setInspectGrn(r)}>Inspect</Button>;
+        return (
+          <Space size={6}>
+            <Button type="link" size="small" style={{ paddingInline: 0 }} onClick={() => setInspectGrn(r)}>{g.gir_number}</Button>
+            <Tag color={GIR_RESULT[g.result]?.[1]}>{GIR_RESULT[g.result]?.[0] || g.result}</Tag>
           </Space>
         );
       }
@@ -199,6 +219,17 @@ const GRNManagement = () => {
               locale={{ emptyText: 'No line items' }}
             />
             <div style={{ marginTop: 20 }}>
+              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                <Space size={8}>
+                  <Text strong>Goods inspection report</Text>
+                  {girs[viewGrn.id]
+                    ? <><Text>{girs[viewGrn.id].gir_number}</Text><Tag color={GIR_RESULT[girs[viewGrn.id].result]?.[1]}>{GIR_RESULT[girs[viewGrn.id].result]?.[0]}</Tag></>
+                    : <Text type="secondary">Not inspected yet</Text>}
+                </Space>
+                <Button icon={<ClipboardCheck size={14} />} onClick={() => setInspectGrn(viewGrn)}>{girs[viewGrn.id] ? 'View GIR' : 'Inspect goods'}</Button>
+              </Space>
+            </div>
+            <div style={{ marginTop: 20 }}>
               <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
                 <Text strong>Returns to vendor{viewReturns.length ? ` (${viewReturns.length})` : ''}</Text>
                 {canReturn && <Button icon={<Undo2 size={14} />} onClick={() => setReturnOpen(true)}>Return to vendor</Button>}
@@ -247,6 +278,13 @@ const GRNManagement = () => {
           </>
         )}
       </Modal>
+
+      <GoodsInspectionModal
+        grn={inspectGrn}
+        open={!!inspectGrn}
+        onClose={() => setInspectGrn(null)}
+        onSaved={load}
+      />
 
       <ReturnToVendorModal
         grn={viewGrn}

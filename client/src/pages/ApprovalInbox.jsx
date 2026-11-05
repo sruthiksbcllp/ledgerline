@@ -6,6 +6,7 @@ import {
 import { CheckCircle, XCircle, History, Clock, MessageSquare } from 'lucide-react';
 import { Row, Col } from 'antd';
 import api from '../utils/api';
+import PoFundImpact from '../components/procurement/PoFundImpact';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -189,6 +190,9 @@ const ApprovalInbox = () => {
         <div style={{ marginBottom: 16 }}>
             <Text type="secondary">Are you sure you want to {actionModal.type.toLowerCase()} this document?</Text>
         </div>
+        {actionModal.record?.module === 'PO' && actionModal.type === 'APPROVE' && (
+          <PoFundImpact approving amount={actionModal.record.total_amount} style={{ marginBottom: 12 }} />
+        )}
         <TextArea 
           placeholder="Add comments/remarks..." 
           rows={4} 

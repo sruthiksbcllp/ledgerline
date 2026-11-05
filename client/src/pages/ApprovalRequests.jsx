@@ -5,6 +5,7 @@ import {
 } from 'antd';
 import { Check, X, Clock, RefreshCcw, Search } from 'lucide-react';
 import api from '../utils/api';
+import PoFundImpact from '../components/procurement/PoFundImpact';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -272,6 +273,9 @@ const ApprovalRequests = () => {
             <Text type="secondary">Document: </Text>
             <Text strong>{actionModal.record.request_number || actionModal.record.pr_number || actionModal.record.po_number || `${actionModal.record.module}-${actionModal.record.id}`}</Text>
           </div>
+        )}
+        {actionModal.record?.module === 'PO' && isApprove && (
+          <PoFundImpact approving amount={actionModal.record.total_amount} style={{ marginBottom: 12 }} />
         )}
         <TextArea
           rows={3}
