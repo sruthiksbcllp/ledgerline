@@ -11,6 +11,7 @@ import {
 import dayjs from 'dayjs';
 import api from '../utils/api';
 import { canSee, getStoredUser, hasPerm } from '../utils/session';
+import PoStatusCard from '../components/procurement/PoStatusCard';
 import {
   ageingBucket, daysPastDue, dueDate, invoiceDate, inr, journalFor, loadApInvoices, num, vendorName,
 } from '../utils/apLedger';
@@ -548,6 +549,8 @@ const ArApDashboard = () => {
           </Row>
         </Col>
       </Row>
+
+      <PoStatusCard style={{ ...card, marginBottom: 16 }} />
 
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} xl={12}>

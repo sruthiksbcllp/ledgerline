@@ -1,11 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { Table, Card, Tag, Space, Modal, Form, Select, InputNumber, Button, message, Typography, Empty, Input, Drawer, Descriptions, Radio } from 'antd';
-import { Plus, Truck, RefreshCcw, Printer, Mail, Eye, Trash2, ListChecks } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Table, Card, Tag, Space, Modal, Form, Select, InputNumber, Button, message, Typography, Empty, Input, Drawer, Descriptions, Radio, Tooltip } from 'antd';
+import { Plus, Truck, RefreshCcw, Printer, Mail, Eye, Trash2, ListChecks, Search, Clock } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
+import PoStatusSummary from '../components/procurement/PoStatusSummary';
+import { PO_GROUPS, poAgeing, poGroupOf, statusLabel } from '../constants/poStatus';
+
+import DateRangeFilter from '../components/base/DateRangeFilter';
+const PO_DATE = (po) => po.order_date || po.createdAt;
 
 const { Title, Text } = Typography;
 
@@ -76,6 +81,21 @@ const PurchaseOrder = () => {
   const [poLineItems, setPoLineItems] = useState([]);
   const [form] = Form.useForm();
   const navigate = useNavigate();
+
+  // List filters: stage group (count cards, also ?group= from the dashboard), exact status,
+  // order date range and a search on PO number / vendor / PR reference.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const groupParam = searchParams.get('group');
+  const group = PO_GROUPS.some((g) => g.key === groupParam) ? groupParam : 'all';
+  const setGroup = (key) => {
+    const next = new URLSearchParams(searchParams);
+    if (key === 'all') next.delete('group'); else next.set('group', key);
+    setSearchParams(next, { replace: true });
+    setStatusFilter(null);
+  };
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [dateRange, setDateRange] = useState(null);
+  const [search, setSearch] = useState('');
 
   const handlePrint = async (id) => {
     try {
@@ -253,6 +273,30 @@ const PurchaseOrder = () => {
 
   const lastActions = useLastActions('PO', pos, pos);
 
+  // POs inside the selected date range; the count cards follow it, the stage/status/search filters don't.
+  const datedPos = useMemo(() => {
+    if (!dateRange?.[0] || !dateRange?.[1]) return pos;
+    const from = dateRange[0].startOf('day').valueOf();
+    const to = dateRange[1].endOf('day').valueOf();
+    return pos.filter((po) => { const t = new Date(PO_DATE(po)).getTime(); return t >= from && t <= to; });
+  }, [pos, dateRange]);
+  const filteredPos = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return datedPos.filter((po) => {
+      if (group !== 'all' && poGroupOf(po.status)?.key !== group) return false;
+      if (statusFilter && po.status !== statusFilter) return false;
+      if (q && ![po.po_number, po.Vendor?.vendor_name, po.PurchaseRequisition?.pr_number].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }, [datedPos, group, statusFilter, search]);
+  const statusOptions = useMemo(() => {
+    const present = [...new Set(pos.map((po) => po.status).filter(Boolean))];
+    return present
+      .filter((s) => group === 'all' || poGroupOf(s)?.key === group)
+      .map((s) => ({ value: s, label: statusLabel(s) }));
+  }, [pos, group]);
+  const filtersOn = group !== 'all' || statusFilter || dateRange || search;
+
   const columns = [
     { title: 'PO Number', dataIndex: 'po_number', key: 'po_number', render: (v) => <Tag color="blue">{v || '-'}</Tag> },
     { title: 'Reference', key: 'pr_reference', render: (_, r) => r?.PurchaseRequisition?.pr_number || '-' },
@@ -269,6 +313,21 @@ const PurchaseOrder = () => {
       dataIndex: 'status',
       key: 'status',
       render: (v) => <Tag color={STATUS_COLOR[v] || 'default'}>{v || '-'}</Tag>
+    },
+    {
+      title: 'Age',
+      key: 'age',
+      sorter: (a, b) => (poAgeing(a)?.days ?? -1) - (poAgeing(b)?.days ?? -1),
+      render: (_, r) => {
+        const age = poAgeing(r);
+        if (!age) return <Text type="secondary">—</Text>;
+        const color = age.overdue ? 'var(--color-danger, #dc2626)' : age.days > 14 ? 'var(--color-orange, #d97706)' : undefined;
+        return (
+          <Tooltip title={age.text}>
+            <span style={{ color, whiteSpace: 'nowrap' }}><Clock size={12} style={{ verticalAlign: -1, marginRight: 4 }} />{age.days}d</span>
+          </Tooltip>
+        );
+      }
     },
     lastActionColumn('PO', lastActions, { numberOf: (r) => r.po_number }),
     {
@@ -310,7 +369,7 @@ const PurchaseOrder = () => {
       <PageHeader
         icon={<Truck size={16} />}
         title="Purchase Orders"
-        subtitle={pos.length + ' records'}
+        subtitle={filtersOn ? `${filteredPos.length} of ${pos.length} records` : pos.length + ' records'}
         actions={(
           <Space>
             <Button icon={<RefreshCcw size={16} />} loading={loading} onClick={fetchData}>Refresh</Button>
@@ -319,11 +378,26 @@ const PurchaseOrder = () => {
         )}
       />
 
+      <div style={{ marginBottom: 16 }}>
+        <PoStatusSummary pos={datedPos} active={group} onSelect={setGroup} />
+      </div>
+
+      <Card style={{ ...contentCard, marginBottom: 16 }} styles={{ body: { padding: '12px 16px' } }}>
+        <Space wrap size={12} style={{ width: '100%' }}>
+          <Input allowClear prefix={<Search size={14} />} placeholder="Search PO, vendor or PR" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }} />
+          <Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} options={statusOptions} style={{ width: 200 }} />
+          <DateRangeFilter value={dateRange} onChange={setDateRange} placeholder={['Order date from', 'Order date to']} />
+          {filtersOn && (
+            <Button type="link" onClick={() => { setGroup('all'); setStatusFilter(null); setDateRange(null); setSearch(''); }}>Clear filters</Button>
+          )}
+        </Space>
+      </Card>
+
       <Card style={contentCard} styles={{ body: { padding: 0 } }}>
         <Table
           columns={columns}
-          locale={{ emptyText: <Empty description="No purchase orders found" style={{ margin: '40px 0' }} /> }}
-          dataSource={pos}
+          locale={{ emptyText: <Empty description={filtersOn ? 'No purchase orders match these filters' : 'No purchase orders found'} style={{ margin: '40px 0' }} /> }}
+          dataSource={filteredPos}
           rowKey="id"
           loading={loading}
           size="middle"

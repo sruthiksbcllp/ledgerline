@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Table, Card, Tag, Space, DatePicker, Select,
-  Row, Col, Typography, message, Button, Empty
+  Table, Card, Tag, Space, Select,
+  Row, Col, Typography, message, Button, Tooltip
 } from 'antd';
-import { FileText, Download, Filter, ClipboardList, ShoppingCart, PackageCheck, GitCompareArrows, Wrench, ChevronRight } from 'lucide-react';
+import { FileText, Download, ClipboardList, ShoppingCart, PackageCheck, GitCompareArrows, Wrench, ChevronRight } from 'lucide-react';
+import { PO_GROUPS, poAgeing, poGroupOf, statusLabel } from '../constants/poStatus';
 import api from '../utils/api';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -16,7 +17,7 @@ import { canSee, getStoredUser, hasPerm, seeScope } from '../utils/session';
 
 const REPORT_DATA = { PR: 'PR', PO: 'PO', GRN: 'GRN', INVOICE: 'INVOICE' };
 
-const { RangePicker } = DatePicker;
+import DateRangeFilter from '../components/base/DateRangeFilter';
 const { Title, Text } = Typography;
 
 const REPORT_TYPES = [
@@ -36,6 +37,29 @@ const ProcurementReports = () => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
   const [settings, setSettings] = useState({ allow_excel_export: true, allow_pdf_export: true });
+  const [dateRange, setDateRange] = useState(null);
+  const [statusFilter, setStatusFilter] = useState(null); // a status, or "group:<key>" for a PO stage
+
+  const recordDate = (record) => (reportType === 'PO' ? record?.order_date || record?.createdAt : record?.createdAt);
+  // Status choices: PO stages first (Awaiting approval, Open, ...) then the statuses in the data.
+  const statusOptions = useMemo(() => {
+    const present = [...new Set(data.map((r) => r?.status).filter(Boolean))].map((s) => ({ value: s, label: statusLabel(s) }));
+    if (reportType !== 'PO') return present;
+    return [
+      { label: 'Stage', options: PO_GROUPS.map((g) => ({ value: `group:${g.key}`, label: g.label })) },
+      { label: 'Status', options: present },
+    ];
+  }, [data, reportType]);
+  const filteredData = useMemo(() => data.filter((record) => {
+    if (dateRange?.[0] && dateRange?.[1]) {
+      const t = new Date(recordDate(record)).getTime();
+      if (!(t >= dateRange[0].startOf('day').valueOf() && t <= dateRange[1].endOf('day').valueOf())) return false;
+    }
+    if (statusFilter?.startsWith('group:')) return poGroupOf(record?.status)?.key === statusFilter.slice(6);
+    if (statusFilter) return record?.status === statusFilter;
+    return true;
+  }), [data, dateRange, statusFilter, reportType]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filtersOn = Boolean(dateRange || statusFilter);
 
   const fetchSettings = async () => {
     try {
@@ -65,6 +89,8 @@ const ProcurementReports = () => {
 
   useEffect(() => { fetchSettings(); }, []);
   useEffect(() => {
+    setDateRange(null);
+    setStatusFilter(null);
     if (!reportType) { setData([]); return; }
     fetchData();
   }, [reportType]);
@@ -74,29 +100,15 @@ const ProcurementReports = () => {
       message.warning('Excel export is disabled by administrator');
       return;
     }
-    if (!Array.isArray(data) || data.length === 0) {
+    if (!Array.isArray(filteredData) || filteredData.length === 0) {
       message.warning('No report data available to export');
       return;
     }
-    const exportRows = data.map((record) => ({
-      Reference: getReferenceValue(record),
-      Property: record?.Property?.property_name || record?.property_name || 'N/A',
-      Location: record?.Location?.location_name || record?.location_name || 'N/A',
-      Amount: getAmountValue(record),
-      Status: record?.status || 'N/A',
-      Date: record?.createdAt ? new Date(record.createdAt).toLocaleDateString() : '-'
-    }));
+    const exportRows = filteredData.map((record) => Object.fromEntries(exportColumns.map((c) => [c.label, c.value(record)])));
 
     const { headerRows, sheetData } = buildBrandedExcelSheet(
       exportRows,
-      [
-        { label: 'Reference', value: 'Reference' },
-        { label: 'Property', value: 'Property' },
-        { label: 'Location', value: 'Location' },
-        { label: 'Amount', value: 'Amount' },
-        { label: 'Status', value: 'Status' },
-        { label: 'Date', value: 'Date' }
-      ],
+      exportColumns.map((c) => ({ label: c.label, value: c.label })),
       `${reportType} Report`
     );
     const worksheet = XLSX.utils.aoa_to_sheet([...headerRows, ...sheetData]);
@@ -110,23 +122,16 @@ const ProcurementReports = () => {
       message.warning('PDF export is disabled by administrator');
       return;
     }
-    if (!Array.isArray(data) || data.length === 0) {
+    if (!Array.isArray(filteredData) || filteredData.length === 0) {
       message.warning('No report data available to export');
       return;
     }
 
-    const doc = new jsPDF();
+    const doc = new jsPDF(exportColumns.length > 6 ? { orientation: 'landscape' } : undefined);
     const startY = await addPdfBranding(doc, `${reportType} Report`);
 
-    const tableColumn = ['Reference', 'Property', 'Location', 'Amount', 'Status', 'Date'];
-    const tableRows = data.map((record) => ([
-      getReferenceValue(record),
-      record?.Property?.property_name || record?.property_name || 'N/A',
-      record?.Location?.location_name || record?.location_name || 'N/A',
-      getAmountValue(record),
-      record?.status || 'N/A',
-      record?.createdAt ? new Date(record.createdAt).toLocaleDateString() : '-'
-    ]));
+    const tableColumn = exportColumns.map((c) => c.label);
+    const tableRows = filteredData.map((record) => exportColumns.map((c) => c.value(record)));
 
     autoTable(doc, {
       head: [tableColumn],
@@ -156,13 +161,46 @@ const ProcurementReports = () => {
     return amount || amount === 0 ? `₹${formatCurrency(amount)}` : '-';
   };
 
+  const isPO = reportType === 'PO';
+  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : '-');
+  // Columns shared by the table and the Excel / PDF exports; the PO report adds Vendor, Stage and Age.
+  const exportColumns = [
+    { label: 'Reference', value: (r) => getReferenceValue(r) },
+    ...(isPO ? [{ label: 'Vendor', value: (r) => r?.Vendor?.vendor_name || '-' }] : []),
+    { label: 'Property', value: (r) => r?.Property?.property_name || r?.property_name || 'N/A' },
+    { label: 'Location', value: (r) => r?.Location?.location_name || r?.location_name || 'N/A' },
+    { label: 'Amount', value: (r) => getAmountValue(r) },
+    { label: 'Status', value: (r) => r?.status || 'N/A' },
+    ...(isPO ? [
+      { label: 'Stage', value: (r) => poGroupOf(r?.status)?.label || '-' },
+      { label: 'Age', value: (r) => poAgeing(r)?.text || '-' },
+    ] : []),
+    { label: 'Date', value: (r) => fmtDate(recordDate(r)) },
+  ];
+
   const columns = [
     { title: 'Reference', key: 'ref', render: (_, record) => getReferenceValue(record) },
+    ...(isPO ? [{ title: 'Vendor', key: 'vendor', render: (_, r) => r?.Vendor?.vendor_name || '-' }] : []),
     { title: 'Property', key: 'property', render: (_, record) => record.Property?.property_name || record.property_name || 'N/A' },
     { title: 'Location', key: 'location', render: (_, record) => record.Location?.location_name || record.location_name || 'N/A' },
     { title: 'Amount', key: 'amount', render: (_, record) => getAmountValue(record) },
     { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color="blue">{s || 'N/A'}</Tag> },
-    { title: 'Date', key: 'date', render: (_, record) => record?.createdAt ? new Date(record.createdAt).toLocaleDateString() : '-' }
+    ...(isPO ? [
+      {
+        title: 'Stage', key: 'stage',
+        render: (_, r) => { const g = poGroupOf(r?.status); return g ? <Tag color={g.color}>{g.label}</Tag> : '-'; }
+      },
+      {
+        title: 'Age', key: 'age',
+        sorter: (a, b) => (poAgeing(a)?.days ?? -1) - (poAgeing(b)?.days ?? -1),
+        render: (_, r) => {
+          const age = poAgeing(r);
+          if (!age) return <Text type="secondary">—</Text>;
+          return <Tooltip title={age.text}><span style={{ color: age.overdue ? '#dc2626' : age.days > 14 ? '#d97706' : undefined }}>{age.days} days</span></Tooltip>;
+        }
+      },
+    ] : []),
+    { title: 'Date', key: 'date', render: (_, record) => fmtDate(recordDate(record)) }
   ];
 
   return (
@@ -200,18 +238,14 @@ const ProcurementReports = () => {
             {reportType && (<>
             <Col span={8}>
               <Text strong>Date Range</Text>
-              <RangePicker style={{ width: '100%', marginTop: 8 }} />
+              <DateRangeFilter style={{ width: '100%', marginTop: 8 }} value={dateRange} onChange={setDateRange} />
             </Col>
             <Col span={6}>
-              <Text strong>Status</Text>
-              <Select style={{ width: '100%', marginTop: 8 }} placeholder="All Statuses">
-                <Select.Option value="APPROVED">Approved</Select.Option>
-                <Select.Option value="PENDING">Pending</Select.Option>
-                <Select.Option value="EXCEPTION">Exception</Select.Option>
-              </Select>
+              <Text strong>{isPO ? 'Stage / Status' : 'Status'}</Text>
+              <Select style={{ width: '100%', marginTop: 8 }} placeholder="All statuses" allowClear value={statusFilter} onChange={setStatusFilter} options={statusOptions} />
             </Col>
             <Col span={4}>
-              <Button style={{ marginTop: 28, width: '100%' }} icon={<Filter size={16} />}>Filter</Button>
+              {filtersOn && <Button style={{ marginTop: 28, width: '100%' }} onClick={() => { setDateRange(null); setStatusFilter(null); }}>Clear filters</Button>}
             </Col>
             </>)}
           </Row>
@@ -246,8 +280,8 @@ const ProcurementReports = () => {
           ) : (
           <Table
             columns={columns}
-            locale={{ emptyText: 'No records found' }}
-            dataSource={data}
+            locale={{ emptyText: filtersOn ? 'No records match these filters' : 'No records found' }}
+            dataSource={filteredData}
             loading={loading}
             rowKey="id"
             size="middle"

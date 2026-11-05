@@ -4,6 +4,7 @@ import { ClipboardList, FilePlus2, LayoutDashboard, PackageCheck, RefreshCcw, Sh
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
+import PoStatusCard from '../components/procurement/PoStatusCard';
 import { canSee, getStoredUser, hasPerm, seeScope, TIER_STYLE } from '../utils/session';
 
 const { Text } = Typography;
@@ -114,6 +115,8 @@ const WorkspaceHome = () => {
           ))}
         </Row>
       )}
+
+      <PoStatusCard style={{ ...card, marginBottom: 16 }} />
 
       <Row gutter={[16, 16]}>
         {showPR && (
