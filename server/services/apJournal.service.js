@@ -22,6 +22,7 @@
  */
 const { Op } = require('sequelize');
 const requestContext = require('../utils/requestContext');
+const { memoSection } = require('../utils/tdsSection');
 
 const ACCOUNTS = [
   { code: '1010', name: 'Operating bank account', type: 'ASSET', description: 'Vendor payments are paid from here' },
@@ -301,7 +302,7 @@ async function postInvoice(invoiceId, opts = {}) {
   const advance = round2(inv.advance_adjusted);
   const netOf = [tds && 'TDS', advance && 'advance'].filter(Boolean).join(' and ');
   lines.push({ account: '2010', credit: round2(gross - tds - advance), memo: `${inv.invoice_number}${netOf ? ` – net of ${netOf}` : ''}` });
-  if (tds) lines.push({ account: '2160', credit: tds, memo: `TDS u/s ${inv.tds_section_code} @ ${Number(inv.tds_rate_percent || 0)}% on taxable value ₹${inr(base)}` });
+  if (tds) lines.push({ account: '2160', credit: tds, memo: `TDS u/s ${memoSection(inv.tds_section_code)} @ ${Number(inv.tds_rate_percent || 0)}% on taxable value ₹${inr(base)}` });
   if (advance) lines.push({ account: '1300', credit: advance, memo: `Advance paid on ${po?.po_number || 'the PO'} adjusted` });
 
   const entry = await post({

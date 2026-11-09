@@ -9,6 +9,7 @@
  * own connected mailbox, copied to them, to the vendor's email in Vendor Master only.
  */
 const { Invoice, ApPayment, Vendor, PurchaseOrder, UserMailAccount, Client } = require('../models');
+const { sectionLabel } = require('../utils/tdsSection');
 const { sendFromMailbox, MailboxError } = require('./userMailbox.service');
 const { tdsOf, netPayableOf, balanceOf } = require('./apJournal.service');
 
@@ -55,7 +56,7 @@ async function loadAdvice(invoiceId, tenantWhere) {
     po_number: po?.po_number || null,
     invoice_total: round2(invoice.total_amount),
     tds,
-    tds_section: tds ? invoice.tds_section_code : null,
+    tds_section: tds ? sectionLabel(invoice.tds_section_code) : null,
     advance: round2(invoice.advance_adjusted),
     returns: round2(invoice.returns_credit),
     discount: round2(invoice.discount_received),

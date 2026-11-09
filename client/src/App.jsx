@@ -54,6 +54,7 @@ const ThreeWayMatch = lazy(() => import('./pages/ThreeWayMatch'));
 const ApAccountingEntry = lazy(() => import('./pages/ApAccountingEntry'));
 const ApManagement = lazy(() => import('./pages/ApManagement'));
 const PaymentProcessing = lazy(() => import('./pages/PaymentProcessing'));
+const MsmePayments = lazy(() => import('./pages/MsmePayments'));
 const RecordToReport = lazy(() => import('./pages/ar/RecordToReport'));
 const ChartOfAccounts = lazy(() => import('./pages/ar/ChartOfAccounts'));
 const ArJournalEntry = lazy(() => import('./pages/ar/JournalEntry'));
@@ -177,6 +178,7 @@ function App() {
               <Route path="/finance/ap-accounting-entry" element={<ApAccountingEntry />} />
               <Route path="/finance/ap-management" element={<ApManagement />} />
               <Route path="/finance/payment-processing" element={<PaymentProcessing />} />
+              <Route path="/finance/msme-payments" element={<MsmePayments />} />
               <Route path="/finance/ar/record-to-report" element={<RecordToReport />} />
               <Route path="/finance/ar/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="/finance/ar/journal-entry" element={<ArJournalEntry />} />

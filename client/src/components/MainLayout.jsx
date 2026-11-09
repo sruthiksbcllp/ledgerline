@@ -17,7 +17,7 @@ import {
   SendHorizontal, Settings, Settings2, Shield, ShieldAlert, ShieldCheck, ShoppingCart,
   Star, Sun, Tag, Ticket, ToggleLeft, Trash2, TrendingDown, TrendingUp,
   User, UserCheck, Users, Users2, WalletCards, Wrench, Menu as LucideMenu,
-  HandCoins, Sparkles, Mail, Undo2,
+  HandCoins, Mail, Undo2,
 } from 'lucide-react';
 
 
@@ -361,12 +361,16 @@ const MainLayout = ({ children }) => {
         { key: '/procurement/grn', icon: <PackageCheck size={16} />, label: 'Goods Receipt (GRN)', hidden: !canSeeProcurement },
         { key: '/procurement/purchase-returns', icon: <Undo2 size={16} />, label: 'Purchase Returns', hidden: !canSeeProcurement },
         { key: '/procurement/ses', icon: <ClipboardCheck size={16} />, label: 'Service Entry Sheet (SES)', hidden: !canSeeProcurement },
-        { key: '/finance/ap/ai-invoices', icon: <Sparkles size={16} />, label: 'AI Invoice Processing', hidden: !canSeeApAutomation },
-        { key: '/procurement/invoices', icon: <ReceiptIndianRupee size={16} />, label: 'Invoice Processing', hidden: !canSeeProcurement || features?.ENABLE_INVOICE_MODULE === false },
+        // One place for all bills: Invoices has "Upload bill (AI)" built in. If the invoice module is
+        // turned off, Invoices opens the AI invoice screen instead.
+        features?.ENABLE_INVOICE_MODULE === false
+          ? { key: '/finance/ap/ai-invoices', icon: <ReceiptIndianRupee size={16} />, label: 'Invoices', hidden: !canSeeApAutomation }
+          : { key: '/procurement/invoices', icon: <ReceiptIndianRupee size={16} />, label: 'Invoices', hidden: !canSeeProcurement && !canSeeApAutomation },
         { key: '/finance/three-way-match', icon: <GitMerge size={16} />, label: '3-Way Match', hidden: !canSeeFinance },
         { key: '/finance/ap-accounting-entry', icon: <BookOpen size={16} />, label: 'AP Journal', hidden: !canSeeApJournal },
         { key: '/finance/ap-management', icon: <Scale size={16} />, label: 'Accounts Payable Management', hidden: !canSeeFinance },
         { key: '/finance/payment-processing', icon: <WalletCards size={16} />, label: 'Payment Processing', hidden: !canSeeFinance },
+        { key: '/finance/msme-payments', icon: <CalendarClock size={16} />, label: 'MSME Payments (45-day)', hidden: !canSeeApJournal },
         { key: '/procurement/vendor-risk', icon: <ShieldCheck size={16} />, label: 'Vendor Risk', hidden: !canSeeProcurement },
         { key: '/procurement/reports', icon: <BarChart3 size={16} />, label: 'Reports', hidden: !canSeeProcurement },
         { key: '/settings/po-print', icon: <Printer size={16} />, label: 'PO Print Settings', hidden: !canSeeFinance },

@@ -77,7 +77,13 @@ const TdsDeposit = ({ style }) => {
         dataSource={data.sections}
         locale={{ emptyText: <Empty description="No TDS deducted yet" style={{ margin: '16px 0' }} /> }}
         columns={[
-          { title: 'Section', dataIndex: 'section', key: 'section', render: (v) => <Text strong>{v}</Text> },
+          {
+            title: 'Section', dataIndex: 'section', key: 'section',
+            render: (v, r) => (r.act2025
+              ? <div><Text strong>{r.act2025}</Text><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>old {v} · {r.description}</div></div>
+              : <Text strong>{v}</Text>)
+          },
+          { title: 'Payment code', dataIndex: 'payment_code', key: 'code', render: (v) => v || '—' },
           { title: 'Deducted from vendors', dataIndex: 'deducted', key: 'ded', align: 'right', render: inr },
           { title: 'Deposited', dataIndex: 'deposited', key: 'dep', align: 'right', render: inr },
           { title: 'Payable to government', dataIndex: 'balance', key: 'bal', align: 'right', render: (v) => <Text strong type={v > 0.009 ? 'warning' : 'secondary'}>{inr(v)}</Text> },

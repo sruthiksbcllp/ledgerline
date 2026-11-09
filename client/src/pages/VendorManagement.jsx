@@ -229,7 +229,7 @@ const VendorManagement = () => {
 
   const openEdit = async (record) => {
     setEditingVendor(record);
-    form.setFieldsValue({ ...record, tds_section_code: record.tds_section_code || '', tds_rate_percent: record.tds_rate_percent != null ? Number(record.tds_rate_percent) : 0 });
+    form.setFieldsValue({ ...record, msme_category: record.msme_category || '', tds_section_code: record.tds_section_code || '', tds_rate_percent: record.tds_rate_percent != null ? Number(record.tds_rate_percent) : 0 });
     try {
       const res = await api.get('/masters/vendors/' + record.id + '/assets');
       const data = normalizeResponse(res?.data);
@@ -243,7 +243,13 @@ const VendorManagement = () => {
   const submit = async (values) => {
     const { asset_ids, ...rest } = values;
     // "No TDS" is stored as no section and a zero rate.
-    const vendorData = { ...rest, tds_section_code: rest.tds_section_code || null, tds_rate_percent: rest.tds_section_code ? (rest.tds_rate_percent ?? null) : 0 };
+    const vendorData = {
+      ...rest, tds_section_code: rest.tds_section_code || null, tds_rate_percent: rest.tds_section_code ? (rest.tds_rate_percent ?? null) : 0,
+      // "Not MSME" is stored as no category.
+      msme_category: rest.msme_category || null,
+      udyam_number: rest.msme_category ? (rest.udyam_number || '').trim().toUpperCase() || null : null,
+      msme_agreed_days: rest.msme_category ? (rest.msme_agreed_days ?? null) : null
+    };
     try {
       let vendorId;
       if (editingVendor) {
@@ -579,6 +585,30 @@ const VendorManagement = () => {
                 )}
               </Form.Item>
             </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} md={8}>
+              <Form.Item name="msme_category" label="MSME (Udyam) category" initialValue="">
+                <Select options={[{ value: '', label: 'Not MSME' }, { value: 'MICRO', label: 'Micro' }, { value: 'SMALL', label: 'Small' }, { value: 'MEDIUM', label: 'Medium' }]} />
+              </Form.Item>
+            </Col>
+            <Form.Item noStyle shouldUpdate={(a, b) => a.msme_category !== b.msme_category}>
+              {() => form.getFieldValue('msme_category') ? (
+                <>
+                  <Col xs={24} md={8}>
+                    <Form.Item name="udyam_number" label="Udyam registration no." rules={[{ pattern: /^UDYAM-[A-Z]{2}-\d{2}-\d{7}$/i, message: 'Format: UDYAM-XX-00-0000000' }]}>
+                      <Input placeholder="UDYAM-TS-02-0001234" maxLength={30} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Form.Item name="msme_agreed_days" label="Payment days agreed" extra={form.getFieldValue('msme_category') === 'MEDIUM' ? 'The 45-day rule covers micro and small only.' : 'Max 45; blank = 15 days (no written agreement).'}>
+                      <InputNumber style={{ width: '100%' }} min={1} max={45} placeholder="15" />
+                    </Form.Item>
+                  </Col>
+                </>
+              ) : null}
+            </Form.Item>
           </Row>
 
           <Form.Item name="rcm_applicable" label="Reverse charge (RCM)" valuePropName="checked" initialValue={false}

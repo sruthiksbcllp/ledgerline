@@ -21,13 +21,13 @@ const NAV = {
   REQUESTER: ['/dashboard', '/procurement/requisition', '/procurement/ses', '/requests/my', '/requests/new', '/my-profile', '/security-settings'],
   PROCUREMENT: ['/dashboard', '/procurement/requisition', '/procurement/rfq', '/procurement/quotations', '/procurement/purchase-orders', '/procurement/purchase-returns', '/procurement/ses', '/procurement/vendor-risk', '/procurement/reports', '/vendor-master', '/my-profile', '/security-settings'],
   MANAGER: ['/dashboard', '/procurement/requisition', '/procurement/ses', '/requests', '/my-profile', '/security-settings'],
-  DIRECTOR_CFO: ['/dashboard', '/procurement/requisition', '/procurement/purchase-orders', '/procurement/ses', '/procurement/reports', '/finance/payment-processing', '/finance/ap-management', '/finance/ap-accounting-entry', '/finance/ar/financial-statements', '/finance/ar/trial-balance', '/my-profile', '/security-settings'],
+  DIRECTOR_CFO: ['/dashboard', '/procurement/requisition', '/procurement/purchase-orders', '/procurement/ses', '/procurement/reports', '/finance/payment-processing', '/finance/msme-payments', '/finance/ap-management', '/finance/ap-accounting-entry', '/finance/ar/financial-statements', '/finance/ar/trial-balance', '/my-profile', '/security-settings'],
   COMPLIANCE: ['/dashboard', '/vendor-master', '/procurement/vendor-approvals', '/procurement/ses', '/procurement/vendor-risk', '/my-profile', '/security-settings'],
   WAREHOUSE: ['/dashboard', '/procurement/requisition/in-house-stock', '/procurement/purchase-orders', '/procurement/grn', '/procurement/purchase-returns', '/procurement/gate-entry', '/my-profile', '/security-settings'],
   FINANCE: ['/dashboard', '/finance', '/procurement/reports', '/procurement/invoices', '/procurement/purchase-returns', '/procurement/ses', '/my-profile', '/security-settings'],
-  ACCOUNTS_PAYABLE: ['/dashboard', '/procurement/invoices', '/procurement/purchase-orders', '/procurement/grn', '/procurement/purchase-returns', '/procurement/ses', '/finance/three-way-match', '/finance/ap-accounting-entry', '/finance/ap-management', '/finance/payment-processing', '/vendor-master', '/my-profile', '/security-settings'],
+  ACCOUNTS_PAYABLE: ['/dashboard', '/procurement/invoices', '/procurement/purchase-orders', '/procurement/grn', '/procurement/purchase-returns', '/procurement/ses', '/finance/three-way-match', '/finance/ap-accounting-entry', '/finance/ap-management', '/finance/payment-processing', '/finance/msme-payments', '/vendor-master', '/my-profile', '/security-settings'],
   ACCOUNTS_RECEIVABLE: ['/dashboard', '/finance/ar', '/my-profile', '/security-settings'],
-  MANAGEMENT: ['/dashboard', '/procurement/reports', '/procurement/ses', '/finance/ap-management', '/finance/ap-accounting-entry', '/finance/ar/financial-statements', '/finance/ar/trial-balance', '/finance/ar/general-ledger', '/my-profile', '/security-settings'],
+  MANAGEMENT: ['/dashboard', '/procurement/reports', '/procurement/ses', '/finance/ap-management', '/finance/msme-payments', '/finance/ap-accounting-entry', '/finance/ar/financial-statements', '/finance/ar/trial-balance', '/finance/ar/general-ledger', '/my-profile', '/security-settings'],
   VENDOR: ['/dashboard', '/procurement/purchase-orders', '/procurement/invoices', '/my-profile', '/security-settings']
 };
 

@@ -25,6 +25,9 @@ module.exports = (sequelize) => {
     gst_registered_state_code: { type: DataTypes.STRING(2) },
     gst_expiry_date: { type: DataTypes.DATE },
     msme_expiry_date: { type: DataTypes.DATE },
+    msme_category: { type: DataTypes.STRING(10), allowNull: true }, // Udyam: MICRO / SMALL / MEDIUM
+    udyam_number: { type: DataTypes.STRING(30), allowNull: true },
+    msme_agreed_days: { type: DataTypes.INTEGER, allowNull: true }, // payment days agreed in writing (max 45)
     pan_verified: { type: DataTypes.BOOLEAN, defaultValue: false },
     compliance_score: { type: DataTypes.INTEGER, defaultValue: 100 },
     compliance_last_checked: { type: DataTypes.DATE },

@@ -7,6 +7,7 @@ const { Op } = require('sequelize');
 const { JournalEntry, JournalLine, GlAccount, Vendor, sequelize } = require('../models');
 const { getClientId } = require('../utils/tenantFilter');
 const journals = require('../services/apJournal.service');
+const { memoSection, sectionInfo } = require('../utils/tdsSection');
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const clientOf = (req) => getClientId(req) || req.user?.client_id || null;
@@ -109,7 +110,7 @@ async function tdsBySection(clientId) {
     else s.deducted += Number(l.credit) - Number(l.debit);
   }
   return Object.values(by)
-    .map((s) => ({ section: s.section, deducted: round2(s.deducted), deposited: round2(s.deposited), balance: round2(s.deducted - s.deposited) }))
+    .map((s) => ({ section: s.section, ...sectionInfo(s.section), deducted: round2(s.deducted), deposited: round2(s.deposited), balance: round2(s.deducted - s.deposited) }))
     .filter((s) => s.deducted || s.deposited)
     .sort((a, b) => a.section.localeCompare(b.section));
 }
@@ -144,9 +145,9 @@ exports.tdsDeposit = async (req, res) => {
   }
   const entry = await journals.post({
     clientId, key: `TDS_DEPOSIT:${challan}:${section}`, eventType: 'TDS_DEPOSIT', sourceModule: 'TDS', sourceId: 0,
-    sourceRef: challan, date, narration: `TDS u/s ${section} deposited with the government – challan ${challan}`,
+    sourceRef: challan, date, narration: `TDS u/s ${memoSection(section)} deposited with the government – challan ${challan}`,
     lines: [
-      { account: '2160', debit: amount, memo: `TDS u/s ${section} deposited – challan ${challan}` },
+      { account: '2160', debit: amount, memo: `TDS u/s ${memoSection(section)} deposited – challan ${challan}` },
       { account: '1010', credit: amount, memo: `TDS challan ${challan}` }
     ]
   });

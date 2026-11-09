@@ -13,6 +13,7 @@ import { ActivityTrail, lastActionColumn, useLastActions } from '../components/p
 import { PaymentAdviceButton } from '../components/finance/PaymentAdvice';
 import InvoiceDocument from '../components/procurement/InvoiceDocument';
 import { JournalEntries, JournalEntryBlock } from '../components/finance/JournalEntries';
+import { tdsSectionLabel } from '../config/tds';
 
 const { Text } = Typography;
 
@@ -28,7 +29,11 @@ const FILTERS = [
 const listOf = (res) => res?.data?.data || res?.data || [];
 const fmt = (d) => (d ? dayjs(d).format('DD MMM YYYY') : '—');
 
-const ApInvoiceAutomation = () => {
+/**
+ * intakeOnly: render just the "upload a bill, AI reads it" drawer, opened by `open`, for use from
+ * Invoice Processing (the single Invoices screen); onSaved runs after the bill is submitted.
+ */
+const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSaved }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('ALL');
@@ -68,7 +73,7 @@ const ApInvoiceAutomation = () => {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (!intakeOnly) load(); }, [load, intakeOnly]);
 
   const loadLookups = async () => {
     const [v, p, pr] = await Promise.all([
@@ -103,6 +108,8 @@ const ApInvoiceAutomation = () => {
     setIntakeOpen(true);
     loadLookups();
   };
+  useEffect(() => { if (intakeOnly && open) openIntake(); }, [intakeOnly, open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const closeIntake = () => { setIntakeOpen(false); onClose?.(); };
 
   const formToPayload = () => {
     const v = form.getFieldsValue(true);
@@ -198,8 +205,8 @@ const ApInvoiceAutomation = () => {
         await api.post(`/procurement/invoices/${created.id}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
       }
       message.success(res?.data?.message || 'Invoice submitted for approval');
-      setIntakeOpen(false);
-      load();
+      closeIntake();
+      if (intakeOnly) onSaved?.(); else load();
     } catch (e) {
       const data = e?.response?.data;
       if (data?.checks) setChecks(data.checks);
@@ -291,6 +298,7 @@ const ApInvoiceAutomation = () => {
 
   return (
     <div>
+      {!intakeOnly && (<>
       <Card style={{ ...card, marginBottom: 16 }} styles={{ body: { padding: 20 } }}>
         <Row justify="space-between" align="middle" gutter={[16, 16]}>
           <Col>
@@ -326,11 +334,12 @@ const ApInvoiceAutomation = () => {
       <Card style={card} styles={{ body: { padding: 0 } }} title={<Segmented value={filter} onChange={setFilter} options={FILTERS} />}>
         <Table rowKey="id" loading={loading} columns={columns} dataSource={visible} scroll={{ x: 'max-content' }} pagination={{ pageSize: 15, hideOnSinglePage: true }} />
       </Card>
+      </>)}
 
       {/* New invoice: upload -> review -> submit */}
       <Drawer
         open={intakeOpen}
-        onClose={() => setIntakeOpen(false)}
+        onClose={closeIntake}
         width={Math.min(940, window.innerWidth)}
         title="New vendor invoice"
         destroyOnClose
@@ -517,7 +526,7 @@ const ApInvoiceAutomation = () => {
               <Descriptions.Item label="GST">{inr(detail.gst_amount)}</Descriptions.Item>
               <Descriptions.Item label="Total"><Text strong>{inr(detail.total_amount)}</Text></Descriptions.Item>
               {Number(detail.tds_deducted) > 0 && (
-                <Descriptions.Item label={`TDS u/s ${detail.tds_section_code} @ ${Number(detail.tds_rate_percent || 0)}%`}>− {inr(detail.tds_deducted)}</Descriptions.Item>
+                <Descriptions.Item label={`TDS u/s ${tdsSectionLabel(detail.tds_section_code)} @ ${Number(detail.tds_rate_percent || 0)}%`}>− {inr(detail.tds_deducted)}</Descriptions.Item>
               )}
               {Number(detail.advance_adjusted) > 0 && (
                 <Descriptions.Item label="Advance adjusted">− {inr(detail.advance_adjusted)}</Descriptions.Item>

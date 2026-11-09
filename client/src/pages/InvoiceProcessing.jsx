@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message, Empty, Row, Col, Upload, Typography, Alert, Popconfirm, Tooltip, Drawer, Radio, Switch } from 'antd';
-import { Plus, RefreshCcw, Download, Upload as UploadIcon, Eye, FileText, Trash2, Edit2, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Plus, RefreshCcw, Download, Upload as UploadIcon, Eye, FileText, Trash2, Edit2, Search, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
 import PageHeader from '../components/PageHeader';
 import { ActivityTrail, lastActionColumn, useLastActions } from '../components/procurement/ActivityTrail';
-import { TDS_SECTIONS, defaultTdsRate } from '../config/tds';
+import { TDS_SECTIONS, defaultTdsRate, tdsSectionLabel } from '../config/tds';
 import { JournalEntries } from '../components/finance/JournalEntries';
 import { invoiceJournalHint } from '../utils/apLedger';
 import { PaymentAdviceButton } from '../components/finance/PaymentAdvice';
+import ApInvoiceAutomation from './ApInvoiceAutomation';
 
 const { Title, Text } = Typography;
 
@@ -33,6 +34,9 @@ const MATCH_STATUS_COLOR = {
 const InvoiceProcessing = () => {
   // Same roles the server lets create invoices (POST /procurement/invoices), plus company admins.
   const canCreateInvoice = ['ADMIN', 'SUPER_ADMIN', 'CLIENT_ADMIN', 'PROVIDER_ADMIN', 'ACCOUNTS_PAYABLE', 'FINANCE', 'VENDOR'].includes(String(JSON.parse(localStorage.getItem('user') || '{}').role || '').toUpperCase());
+  // "Upload bill (AI)": the AI reader from AI Invoice Processing (server: AP clerks and admins), not vendors.
+  const canUploadAi = canCreateInvoice && String(JSON.parse(localStorage.getItem('user') || '{}').role || '').toUpperCase() !== 'VENDOR';
+  const [aiOpen, setAiOpen] = useState(false);
   const [data, setData] = useState([]);
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
@@ -309,7 +313,7 @@ const InvoiceProcessing = () => {
     <div style={{ background: 'var(--color-bg-page)', minHeight: '100%', margin: -24, padding: 24 }}>
       <PageHeader
         icon={<span style={{ fontSize: 18, color: 'var(--color-text-secondary)' }}>📄</span>}
-        title="Invoice Processing"
+        title="Invoices"
         subtitle={`${data.length} invoices`}
         actions={(
           <Space>
@@ -319,6 +323,11 @@ const InvoiceProcessing = () => {
             <Button icon={<Download size={14} />} onClick={exportAllInvoices}>
               Export Excel
             </Button>
+            {canUploadAi && (
+              <Button icon={<Sparkles size={14} />} onClick={() => setAiOpen(true)}>
+                Upload bill (AI)
+              </Button>
+            )}
             {canCreateInvoice && (
               <Button icon={<Plus size={14} />} type="primary" onClick={openAdd}>
                 New Invoice
@@ -327,6 +336,7 @@ const InvoiceProcessing = () => {
           </Space>
         )}
       />
+      {canUploadAi && <ApInvoiceAutomation intakeOnly open={aiOpen} onClose={() => setAiOpen(false)} onSaved={load} />}
 
       {gstWarnings.length > 0 && (
         <Alert
@@ -493,7 +503,7 @@ const InvoiceProcessing = () => {
                         {advanceInfo.available > advance && <div>{inr(advanceInfo.available - advance)} of the advance stays for later invoices on {advanceInfo.po_number}.</div>}
                         <Descriptions size="small" column={1} style={{ marginTop: 8 }} items={[
                           { key: 't', label: 'Invoice total', children: inr(total) },
-                          ...(tds ? [{ key: 'd', label: `Less TDS ${getFieldValue('tds_section_code')} @ ${Number(getFieldValue('tds_rate_percent') || 0)}%`, children: `– ${inr(tds)}` }] : []),
+                          ...(tds ? [{ key: 'd', label: `Less TDS u/s ${tdsSectionLabel(getFieldValue('tds_section_code'))} @ ${Number(getFieldValue('tds_rate_percent') || 0)}%`, children: `– ${inr(tds)}` }] : []),
                           { key: 'a', label: 'Less advance adjusted', children: `– ${inr(advance)}` },
                           { key: 'n', label: <b>Net payable to vendor</b>, children: <b>{inr(Math.max(0, total - tds - advance))}</b> }
                         ]} />
