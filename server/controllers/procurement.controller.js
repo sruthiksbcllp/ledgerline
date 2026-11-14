@@ -1880,7 +1880,7 @@ exports.getInvoices = async (req, res, next) => {
       where: buildAdminWhere(req),
       include: [
         { model: PurchaseOrder },
-        { model: Property, attributes: ['id', 'property_name'] },
+        { model: Property, attributes: ['id', 'property_name', 'state_code', 'gstin'] },
         { model: Location, attributes: ['id', 'location_name'], required: false },
         { model: Vendor },
         { model: GRN, attributes: ['id', 'grn_number'], required: false },
@@ -1888,13 +1888,16 @@ exports.getInvoices = async (req, res, next) => {
       ],
       order: [['createdAt', 'DESC']]
     });
+    // Each invoice carries its GST status (vendor GSTIN, IGST vs CGST/SGST, split adds up, RCM).
+    const { gstStatusOf } = require('../services/billGstChecks.service');
+    const withGst = (list) => list.map((invoice) => ({ ...invoice.toJSON(), ...gstStatusOf(invoice) }));
     if (String(req.user?.role || '').toUpperCase() === 'VENDOR') {
       const owner = await User.findByPk(req.user.id, { attributes: ['vendor_id'] });
       const ownVendorId = Number(owner?.vendor_id || 0);
       const own = ownVendorId ? invoices.filter((invoice) => Number(invoice.vendor_id) === ownVendorId) : [];
-      return success(res, own);
+      return success(res, withGst(own));
     }
-    return success(res, invoices);
+    return success(res, withGst(invoices));
   } catch (error) {
     res.json({ success: true, data: [] });
   }

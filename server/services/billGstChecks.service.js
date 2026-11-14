@@ -128,4 +128,41 @@ async function gstIssues({ clientId, vendor, facts, propertyId = null }) {
   return out;
 }
 
-module.exports = { factsFromExtraction, cleanFacts, companyGstins, gstIssues };
+/**
+ * GST status of a saved invoice, from what is stored (no database calls): the invoice with its
+ * Vendor and Property loaded. Used for the Invoices page's "GST compliance" warning.
+ * @returns {{ gst_compliant: boolean, gst_issues: string[] }}
+ */
+function gstStatusOf(invoice) {
+  const issues = [];
+  if (invoice.status === 'REJECTED') return { gst_compliant: true, gst_issues: [] };
+  const vendor = invoice.Vendor || invoice.vendor || null;
+  const gst = Number(invoice.gst_amount || 0);
+  const cgst = Number(invoice.cgst_amount || 0);
+  const sgst = Number(invoice.sgst_amount || 0);
+  const igst = Number(invoice.igst_amount || 0);
+  const vendorGstin = clean(vendor?.gst_number) || null;
+
+  if (gst > 0 && !vendorGstin) issues.push('GST is charged, but the vendor has no GSTIN in Vendor Master, so the GST credit cannot be claimed');
+  if (vendorGstin) {
+    const c = checkGstin(vendorGstin);
+    if (!c.valid) issues.push(`The vendor GSTIN ${vendorGstin} is not a valid GSTIN: ${c.reason}`);
+    const pan = String(vendor?.pan_number || '').trim().toUpperCase();
+    if (c.valid && pan && panOf(vendorGstin) !== pan) issues.push(`The PAN inside the vendor GSTIN (${panOf(vendorGstin)}) is not the vendor's PAN (${pan})`);
+  }
+  if (gst > 0 && !invoice.reverse_charge && vendor?.rcm_applicable) issues.push('The vendor is marked reverse charge (RCM), but GST was charged on this bill');
+  if ((cgst || sgst || igst) && gst > 0 && Math.abs(cgst + sgst + igst - gst) > 1) {
+    issues.push(`CGST + SGST + IGST (${cgst + sgst + igst}) does not add up to the GST amount (${gst})`);
+  }
+  const vendorState = stateOf(vendorGstin);
+  const prop = invoice.Property || invoice.property || null;
+  const ourState = (prop?.state_code ? String(prop.state_code).padStart(2, '0') : null) || stateOf(prop?.gstin);
+  if (vendorState && ourState) {
+    if (vendorState === ourState && igst > 1) issues.push(`IGST is charged, but the vendor and the property are both in state ${vendorState}: it should be CGST + SGST`);
+    if (vendorState !== ourState && cgst + sgst > 1) issues.push(`CGST/SGST is charged on an inter-state bill (vendor in state ${vendorState}, property in ${ourState}): it should be IGST`);
+  }
+  if (cgst > 0 && sgst > 0 && Math.abs(cgst - sgst) > 1) issues.push(`CGST (${cgst}) and SGST (${sgst}) should be equal`);
+  return { gst_compliant: issues.length === 0, gst_issues: issues };
+}
+
+module.exports = { factsFromExtraction, cleanFacts, companyGstins, gstIssues, gstStatusOf };

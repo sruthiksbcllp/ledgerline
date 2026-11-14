@@ -18,7 +18,6 @@ const savedTab = () => { try { return localStorage.getItem(TAB_KEY) === 'inbox' 
 const { Title, Text } = Typography;
 
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
-const primaryBtn = { background: 'var(--gradient-orange)', border: 'none' };
 
 const STATUS_COLOR = {
   UNPAID: 'error',
@@ -320,7 +319,8 @@ const InvoiceProcessing = () => {
     }
   ];
 
-  const gstWarnings = data.filter((d) => !d.gst_compliant);
+  // Only invoices the server found a real GST problem on (missing flag = not checked, not a problem).
+  const gstWarnings = data.filter((d) => d.gst_compliant === false);
 
   return (
     <div style={{ background: 'var(--color-bg-page)', minHeight: '100%', margin: -24, padding: 24 }}>
@@ -361,8 +361,15 @@ const InvoiceProcessing = () => {
 
       {gstWarnings.length > 0 && (
         <Alert
-          message="GST Compliance Alert"
-          description={`${gstWarnings.length} invoice(s) have GST compliance issues. Please review.`}
+          message={`GST issues on ${gstWarnings.length} invoice${gstWarnings.length === 1 ? '' : 's'}`}
+          description={(
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {gstWarnings.slice(0, 5).map((inv) => (
+                <li key={inv.id}><strong>{inv.invoice_number}</strong>{inv.Vendor?.vendor_name ? ` (${inv.Vendor.vendor_name})` : ''}: {(inv.gst_issues || []).join('; ')}</li>
+              ))}
+              {gstWarnings.length > 5 && <li>and {gstWarnings.length - 5} more: open an invoice to see its GST check</li>}
+            </ul>
+          )}
           type="warning"
           showIcon
           style={{ marginBottom: 20, borderRadius: 'var(--radius-lg)' }}
@@ -581,7 +588,11 @@ const InvoiceProcessing = () => {
             {viewingInvoice.external_payment_ref && <Descriptions.Item label="Voucher / Ref">{viewingInvoice.external_payment_ref}</Descriptions.Item>}
             {viewingInvoice.payment_date && <Descriptions.Item label="Payment Date">{new Date(viewingInvoice.payment_date).toLocaleDateString()}</Descriptions.Item>}
             {viewingInvoice.payment_synced_at && <Descriptions.Item label="Synced">{new Date(viewingInvoice.payment_synced_at).toLocaleString()}</Descriptions.Item>}
-            <Descriptions.Item label="GST Compliant">{viewingInvoice.gst_compliant ? 'Yes' : 'No'}</Descriptions.Item>
+            <Descriptions.Item label="GST check">
+              {viewingInvoice.gst_compliant !== false ? 'No issues found' : (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>{(viewingInvoice.gst_issues || []).map((g) => <li key={g}>{g}</li>)}</ul>
+              )}
+            </Descriptions.Item>
             {viewingInvoice.document_url && (
               <Descriptions.Item label="Document">
                 <Button type="link" href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${viewingInvoice.document_url}`} target="_blank" icon={<Eye size={14} />}>
