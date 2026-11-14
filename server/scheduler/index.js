@@ -69,6 +69,14 @@ const startScheduler = () => {
     } catch { /* non-fatal */ }
   });
 
+  // Bill inbox: check connected Outlook mailboxes for new vendor bills (every 15 minutes)
+  const billInbox = require('../services/billInbox.service');
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      await billInbox.checkAll();
+    } catch { /* non-fatal */ }
+  });
+
   // Daily notifications — overdue maintenance, expiring insurance/warranty (8am)
   const notificationScheduler = require('../services/notificationScheduler.service');
   cron.schedule('0 8 * * *', async () => {

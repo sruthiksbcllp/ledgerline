@@ -115,4 +115,4 @@ function bucketFallback(req, res, next) {
     .catch(next);
 }
 
-module.exports = { enabled, driver, persistUpload, bucketFallback, uploadRoot };
+module.exports = { enabled, driver, persistUpload, readStored, bucketFallback, uploadRoot };

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message, Empty, Row, Col, Upload, Typography, Alert, Popconfirm, Tooltip, Drawer, Radio, Switch } from 'antd';
+import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message, Empty, Row, Col, Upload, Typography, Alert, Popconfirm, Tooltip, Drawer, Radio, Switch, Tabs, Badge } from 'antd';
 import { Plus, RefreshCcw, Download, Upload as UploadIcon, Eye, FileText, Trash2, Edit2, Search, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react';
 import api from '../utils/api';
 import { normalizeResponse } from '../utils/apiNormalizer';
@@ -10,6 +10,10 @@ import { JournalEntries } from '../components/finance/JournalEntries';
 import { invoiceJournalHint } from '../utils/apLedger';
 import { PaymentAdviceButton } from '../components/finance/PaymentAdvice';
 import ApInvoiceAutomation from './ApInvoiceAutomation';
+import BillInbox from '../components/finance/BillInbox';
+
+const TAB_KEY = 'invoices.tab';
+const savedTab = () => { try { return localStorage.getItem(TAB_KEY) === 'inbox' ? 'inbox' : 'invoices'; } catch { return 'invoices'; } };
 
 const { Title, Text } = Typography;
 
@@ -37,6 +41,15 @@ const InvoiceProcessing = () => {
   // "Upload bill (AI)": the AI reader from AI Invoice Processing (server: AP clerks and admins), not vendors.
   const canUploadAi = canCreateInvoice && String(JSON.parse(localStorage.getItem('user') || '{}').role || '').toUpperCase() !== 'VENDOR';
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiItemId, setAiItemId] = useState(null); // bill from the bill inbox opened for review
+  const [tab, setTab] = useState(() => (canUploadAi ? savedTab() : 'invoices'));
+  const [inboxRefresh, setInboxRefresh] = useState(0);
+  const [inboxCount, setInboxCount] = useState(0);
+  const changeTab = (key) => { setTab(key); try { localStorage.setItem(TAB_KEY, key); } catch { /* ignore */ } };
+  useEffect(() => {
+    if (!canUploadAi) return;
+    api.get('/bill-inbox/count').then((r) => setInboxCount(r?.data?.data?.open || 0)).catch(() => {});
+  }, [canUploadAi]);
   const [data, setData] = useState([]);
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
@@ -324,7 +337,7 @@ const InvoiceProcessing = () => {
               Export Excel
             </Button>
             {canUploadAi && (
-              <Button icon={<Sparkles size={14} />} onClick={() => setAiOpen(true)}>
+              <Button icon={<Sparkles size={14} />} onClick={() => { setAiItemId(null); setAiOpen(true); }}>
                 Upload bill (AI)
               </Button>
             )}
@@ -336,7 +349,15 @@ const InvoiceProcessing = () => {
           </Space>
         )}
       />
-      {canUploadAi && <ApInvoiceAutomation intakeOnly open={aiOpen} onClose={() => setAiOpen(false)} onSaved={load} />}
+      {canUploadAi && (
+        <ApInvoiceAutomation
+          intakeOnly
+          open={aiOpen}
+          inboxItemId={aiItemId}
+          onClose={() => { setAiOpen(false); setAiItemId(null); }}
+          onSaved={() => { load(); setInboxRefresh((k) => k + 1); }}
+        />
+      )}
 
       {gstWarnings.length > 0 && (
         <Alert
@@ -350,6 +371,24 @@ const InvoiceProcessing = () => {
       )}
 
       <Card style={contentCard} styles={{ body: { padding: 0 } }}>
+        {canUploadAi && (
+          <Tabs
+            activeKey={tab}
+            onChange={changeTab}
+            tabBarStyle={{ padding: '0 20px', marginBottom: 0 }}
+            items={[
+              { key: 'invoices', label: 'Invoices' },
+              { key: 'inbox', label: <Space size={6}>Bill inbox<Badge count={inboxCount} size="small" overflowCount={99} /></Space> },
+            ]}
+          />
+        )}
+        {tab === 'inbox' && canUploadAi ? (
+          <BillInbox
+            refreshKey={inboxRefresh}
+            onCount={setInboxCount}
+            onReview={(id) => { setAiItemId(id); setAiOpen(true); }}
+          />
+        ) : (<>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border)' }}>
           <Row gutter={12} align="middle">
             <Col xs={24} sm={10}>
@@ -377,6 +416,7 @@ const InvoiceProcessing = () => {
           pagination={{ showSizeChanger: true, pageSizeOptions: ['10','25','50'], pageSize: 10, showTotal: (total) => `Total: ${total} invoices`, position: ['bottomRight'] }}
           scroll={{ x: 'max-content' }}
         />
+        </>)}
       </Card>
 
       <Modal

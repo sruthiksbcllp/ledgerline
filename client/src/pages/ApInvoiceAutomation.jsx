@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Button, Card, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Segmented,
-  Select, Space, Switch, Table, Tag, Typography, message,
+  Select, Space, Spin, Switch, Table, Tag, Typography, message,
 } from 'antd';
-import { CheckCircle2, FilePlus2, PenLine, ReceiptIndianRupee, RefreshCcw, Sparkles, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, ExternalLink, FilePlus2, PenLine, ReceiptIndianRupee, RefreshCcw, Sparkles, Trash2, XCircle } from 'lucide-react';
 import dayjs from 'dayjs';
 import api from '../utils/api';
 import { inr, invoiceJournalHint } from '../utils/apLedger';
@@ -32,8 +32,10 @@ const fmt = (d) => (d ? dayjs(d).format('DD MMM YYYY') : '—');
 /**
  * intakeOnly: render just the "upload a bill, AI reads it" drawer, opened by `open`, for use from
  * Invoice Processing (the single Invoices screen); onSaved runs after the bill is submitted.
+ * inboxItemId: open a bill captured from email (bill inbox) already read and filled in; submitting
+ * it accepts that bill.
  */
-const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSaved }) => {
+const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSaved, inboxItemId = null }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('ALL');
@@ -47,6 +49,7 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
   const [extracting, setExtracting] = useState(false);
   const [extraction, setExtraction] = useState(null);
   const [sourceFile, setSourceFile] = useState(null);
+  const [inboxItem, setInboxItem] = useState(null); // bill from the bill inbox being reviewed
   const [checks, setChecks] = useState(null);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -104,12 +107,49 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
     setExtraction(null);
     setSourceFile(null);
     setChecks(null);
+    setInboxItem(null);
     setStep('upload');
     setIntakeOpen(true);
     loadLookups();
   };
-  useEffect(() => { if (intakeOnly && open) openIntake(); }, [intakeOnly, open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const closeIntake = () => { setIntakeOpen(false); onClose?.(); };
+  useEffect(() => {
+    if (!intakeOnly || !open) return;
+    openIntake();
+    if (inboxItemId) loadInboxItem(inboxItemId);
+  }, [intakeOnly, open, inboxItemId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const closeIntake = () => { setIntakeOpen(false); setInboxItem(null); onClose?.(); };
+
+  // A bill captured from email: the AI has already read it, so fill the form from what it read.
+  const loadInboxItem = async (id) => {
+    setStep('loading');
+    try {
+      const [detail, file] = await Promise.all([
+        api.get(`/bill-inbox/${id}`),
+        api.get(`/bill-inbox/${id}/file`, { responseType: 'blob' }),
+      ]);
+      const item = detail?.data?.data;
+      const doc = new File([file.data], item.file_name || 'bill', { type: item.content_type || file.data.type });
+      setInboxItem(item);
+      if (item.extraction?.header) {
+        applyExtraction(item.extraction, doc);
+      } else {
+        message.warning('The AI could not read this bill. Enter the details from the file.');
+        setSourceFile(doc);
+        form.setFieldsValue({ invoice_date: dayjs(), due_date: dayjs().add(30, 'day'), tax_rate_percent: 18 });
+        setStep('review');
+        runValidate();
+      }
+    } catch (e) {
+      message.error(e?.response?.data?.message || 'Could not open the bill from the inbox');
+      closeIntake();
+    }
+  };
+  const openSourceFile = () => {
+    if (!sourceFile) return;
+    const url = URL.createObjectURL(sourceFile);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
 
   const formToPayload = () => {
     const v = form.getFieldsValue(true);
@@ -128,6 +168,18 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
       reverse_charge: Boolean(v.reverse_charge),
       line_items: (v.line_items || []).filter((l) => l && (l.description || l.amount)),
       source: extraction ? 'AI_EXTRACTED' : 'MANUAL',
+      bill_inbox_id: inboxItem?.id || undefined,
+      // What the AI read, so the server can record which fields were corrected (inbox bills: the server has it).
+      ai_read: extraction && !inboxItem ? {
+        vendor_id: extraction.matches?.vendor?.id || null,
+        po_id: extraction.matches?.purchase_order?.id || null,
+        invoice_number: extraction.header?.invoice_number?.value,
+        invoice_date: extraction.header?.invoice_date?.value,
+        due_date: extraction.header?.due_date?.value,
+        subtotal: extraction.header?.subtotal?.value,
+        tax_amount: extraction.header?.tax_amount?.value,
+        total_amount: extraction.header?.total_amount?.value,
+      } : undefined,
     };
   };
 
@@ -157,6 +209,16 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
       if (data.document_type && !['INVOICE', 'CREDIT_NOTE'].includes(data.document_type)) {
         message.warning(`This looks like a ${data.document_type.replace(/_/g, ' ').toLowerCase()}, not a vendor invoice. Check the details carefully.`);
       }
+      applyExtraction(data, file);
+    } catch (e) {
+      message.error(e?.response?.data?.message || 'Could not read the document. Enter the invoice manually.');
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  /** Fills the review form from what the AI read (uploaded now, or earlier from email). */
+  function applyExtraction(data, file) {
       const h = data.header;
       const m = data.matches || {};
       form.setFieldsValue({
@@ -176,12 +238,7 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
       setSourceFile(file);
       setStep('review');
       runValidate();
-    } catch (e) {
-      message.error(e?.response?.data?.message || 'Could not read the document. Enter the invoice manually.');
-    } finally {
-      setExtracting(false);
-    }
-  };
+  }
 
   const enterManually = () => {
     setExtraction(null);
@@ -341,15 +398,22 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
         open={intakeOpen}
         onClose={closeIntake}
         width={Math.min(940, window.innerWidth)}
-        title="New vendor invoice"
+        title={inboxItem ? `Bill from ${inboxItem.email_from_name || inboxItem.email_from}` : 'New vendor invoice'}
         destroyOnClose
         extra={step === 'review' && (
           <Space>
-            <Button onClick={() => setStep('upload')}>Back</Button>
+            {!inboxItem && <Button onClick={() => setStep('upload')}>Back</Button>}
             <Button type="primary" loading={saving} disabled={checks?.some((c) => c.severity === 'error')} onClick={submitInvoice}>Submit for approval</Button>
           </Space>
         )}
       >
+        {step === 'loading' && (
+          <div style={{ textAlign: 'center', padding: '64px 0' }}>
+            <Spin />
+            <div style={{ marginTop: 12 }}><Text type="secondary">Opening the bill from the inbox…</Text></div>
+          </div>
+        )}
+
         {step === 'upload' && (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <DocumentDropzone
@@ -372,9 +436,28 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
                 type="info"
                 showIcon
                 icon={<Sparkles size={16} />}
-                message={`Read from ${sourceFile?.name || 'document'}`}
+                message={`Read from ${sourceFile?.name || 'document'}${inboxItem ? ` (email from ${inboxItem.email_from})` : ''}`}
                 description="Highlighted fields need a check. Nothing is saved until you submit."
+                action={sourceFile && <Button size="small" icon={<ExternalLink size={13} />} onClick={openSourceFile}>Open the file</Button>}
               />
+            )}
+            {!extraction && inboxItem && sourceFile && (
+              <Alert style={{ marginBottom: 16 }} type="warning" showIcon message={`Enter the details from ${sourceFile.name}`} action={<Button size="small" icon={<ExternalLink size={13} />} onClick={openSourceFile}>Open the file</Button>} />
+            )}
+            {inboxItem?.spot_check && (
+              <Alert style={{ marginBottom: 16 }} type="success" showIcon message="Spot check" description="Every check passed on this bill. It was picked at random for a person to confirm, so the automatic checks stay honest." />
+            )}
+            {!inboxItem?.spot_check && inboxItem?.auto_check?.reasons?.length > 0 && (
+              <Alert
+                style={{ marginBottom: 16 }}
+                type="warning"
+                showIcon
+                message="Why this bill needs you"
+                description={<ul style={{ margin: 0, paddingLeft: 18 }}>{inboxItem.auto_check.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
+              />
+            )}
+            {matches.purchase_order?.matched_by === 'ONLY_OPEN_PO' && (
+              <Alert style={{ marginBottom: 16 }} type="warning" showIcon message={`The bill shows no PO number. PO ${matches.purchase_order.po_number} is this vendor's only open PO, so it was filled in. Check it.`} />
             )}
             {matches.duplicate && (
               <Alert style={{ marginBottom: 16 }} type="error" showIcon message={`Already recorded: invoice ${matches.duplicate.invoice_number} (#${matches.duplicate.id}) from this vendor`} />

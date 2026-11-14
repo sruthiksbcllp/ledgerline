@@ -7,7 +7,7 @@
  */
 const { Op, fn, col, where: sqlWhere } = require('sequelize');
 const {
-  sequelize, Invoice, ApInvoiceLine, ApPayment, Vendor, PurchaseOrder, Property
+  sequelize, Invoice, ApInvoiceLine, ApPayment, Vendor, PurchaseOrder, Property, BillInboxItem
 } = require('../models');
 const { buildAdminWhere, getClientId } = require('../utils/tenantFilter');
 const { extractInvoice, checkInvoiceNumbers, normalizeDate, toNumber } = require('../services/invoiceExtraction.service');
@@ -149,14 +149,29 @@ exports.validate = async (req, res) => {
   return res.json({ success: true, data: { checks: review.checks, duplicate: review.duplicate, possible_duplicate: review.possibleDuplicate } });
 };
 
-exports.create = async (req, res) => {
-  const review = await reviewInvoice(req, req.body || {});
+/**
+ * Validates and saves an AP invoice; shared by the "Submit for approval" button and the bill inbox's
+ * automatic submission of clean bills (options.auto). Returns { status, json } for the response.
+ * Records what the AI read vs what was submitted (ap_ai_reviews) when the bill was read by AI.
+ */
+async function submitApInvoice(req, body, { auto = false } = {}) {
+  const out = (status, json) => ({ status, json });
+  const review = await reviewInvoice(req, body);
   const errors = review.checks.filter((c) => c.severity === 'error');
   if (errors.length) {
-    return fail(res, review.duplicate ? 409 : 422, errors[0].message, { checks: review.checks });
+    return out(review.duplicate ? 409 : 422, { success: false, message: errors[0].message, checks: review.checks });
   }
   const { data, vendor, po } = review;
   const clientId = vendor.client_id || getClientId(req);
+  // Accepting a bill from the bill inbox (captured from email): it must be this company's and still open.
+  let inboxItem = null;
+  if (body.bill_inbox_id) {
+    inboxItem = await BillInboxItem.findOne({ where: { client_id: clientId, id: Number(body.bill_inbox_id) } });
+    if (!inboxItem) return out(404, { success: false, message: 'That bill is no longer in the bill inbox' });
+    if (!['NEW', 'FAILED', 'DUPLICATE', 'SET_ASIDE'].includes(inboxItem.status)) {
+      return out(409, { success: false, message: inboxItem.invoice_id ? `This bill was already accepted (invoice #${inboxItem.invoice_id})` : 'This bill has already been dealt with in the bill inbox' });
+    }
+  }
   const subtotal = data.subtotal ?? round2(data.total_amount - data.tax_amount);
   // Reverse charge (RCM): the company pays the GST itself, so the vendor is owed the subtotal only.
   const reverseCharge = data.reverse_charge ?? Boolean(vendor.rcm_applicable);
@@ -184,7 +199,7 @@ exports.create = async (req, res) => {
         status: 'UNPAID',
         matching_status: 'PENDING',
         paid_amount: 0,
-        source: req.body.source === 'AI_EXTRACTED' ? 'AI_EXTRACTED' : 'MANUAL'
+        source: body.source === 'AI_EXTRACTED' ? 'AI_EXTRACTED' : 'MANUAL'
       }, { transaction });
       if (data.line_items.length) {
         await ApInvoiceLine.bulkCreate(data.line_items.map((l, i) => ({
@@ -192,17 +207,41 @@ exports.create = async (req, res) => {
           quantity: l.quantity, unit_price: l.unit_price, amount: l.amount ?? 0, tax_rate_percent: l.tax_rate_percent
         })), { transaction });
       }
+      if (inboxItem) {
+        await inboxItem.update({
+          status: 'ACCEPTED', status_reason: auto ? 'Auto-submitted: every check passed' : null, invoice_id: created.id,
+          auto_submitted: auto, reviewed_by: auto ? null : req.user.id, reviewed_at: new Date()
+        }, { transaction });
+      }
       return created;
     });
+    const fromEmail = inboxItem ? ` Captured from email from ${inboxItem.email_from}${inboxItem.email_subject ? ` ("${inboxItem.email_subject}")` : ''}.` : '';
+    const how = auto
+      ? 'Read by AI and submitted automatically by the bill inbox: every clean-bill check passed'
+      : (invoice.source === 'AI_EXTRACTED' ? 'Extracted by AI, reviewed and submitted' : 'Entered manually and submitted');
     await recordAudit(req, {
       module: 'AP', entityType: 'INVOICE', entityId: invoice.id, action: 'AP_INVOICE_SUBMITTED', after: invoice,
-      note: `${invoice.source === 'AI_EXTRACTED' ? 'Extracted by AI, reviewed and submitted' : 'Entered manually and submitted'} for approval`
+      note: `${how} for approval.${fromEmail}`
     });
-    return res.status(201).json({ success: true, message: 'Invoice submitted for approval', data: invoice, checks: review.checks });
+    // Evidence for straight-through processing: what the AI read vs what was submitted.
+    const autoSubmit = require('../services/apAutoSubmit.service');
+    const read = inboxItem?.extraction?.header ? autoSubmit.readValuesFromExtraction(inboxItem.extraction) : autoSubmit.cleanReadValues(body.ai_read);
+    if (read) {
+      await autoSubmit.recordReview({
+        clientId, invoice, read, inboxItemId: inboxItem?.id || null, channel: inboxItem ? 'EMAIL' : 'UPLOAD', auto,
+        submitted: { vendor_id: vendor.id, po_id: po?.id || null, invoice_number: data.invoice_number, invoice_date: data.invoice_date, due_date: data.due_date, subtotal, tax_amount: data.tax_amount, total_amount: data.total_amount }
+      }).catch((e) => console.error('[ap-ai-review]', e.message));
+    }
+    return out(201, { success: true, message: 'Invoice submitted for approval', data: invoice, checks: review.checks });
   } catch (error) {
-    if (error.name === 'SequelizeUniqueConstraintError') return fail(res, 409, 'This invoice number is already recorded for this vendor.');
-    return fail(res, 500, error.message || 'Could not save the invoice');
+    if (error.name === 'SequelizeUniqueConstraintError') return out(409, { success: false, message: 'This invoice number is already recorded for this vendor.' });
+    return out(500, { success: false, message: error.message || 'Could not save the invoice' });
   }
+}
+
+exports.create = async (req, res) => {
+  const result = await submitApInvoice(req, req.body || {});
+  return res.status(result.status).json(result.json);
 };
 
 exports.list = async (req, res) => {
@@ -345,3 +384,8 @@ exports.paymentAdviceSend = async (req, res) => {
 };
 
 exports.STATUS_LABEL = STATUS_LABEL;
+// Shared with the bill inbox (services/billInbox.service.js), which matches emailed bills the same way.
+exports.matchVendor = matchVendor;
+exports.findDuplicates = findDuplicates;
+exports.submitApInvoice = submitApInvoice;
+exports.reviewInvoice = reviewInvoice;

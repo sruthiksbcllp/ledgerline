@@ -26,7 +26,7 @@ const HEADER_KEYS = ['invoice_number', 'invoice_date', 'due_date', 'po_number', 
 const SCHEMA = {
   type: 'object',
   properties: {
-    document_type: { type: 'string', enum: ['INVOICE', 'PURCHASE_ORDER', 'PAYMENT_RECEIPT', 'CREDIT_NOTE', 'OTHER'] },
+    document_type: { type: 'string', enum: ['INVOICE', 'PURCHASE_ORDER', 'PAYMENT_RECEIPT', 'CREDIT_NOTE', 'STATEMENT', 'OTHER'] },
     party: {
       type: 'object',
       properties: Object.fromEntries(PARTY_KEYS.map((k) => [k, field])),
@@ -85,7 +85,7 @@ Rules:
 - Dates as YYYY-MM-DD. Amounts as plain numbers (11800.00), no currency symbol or commas.
 - If a field is not in the document, return an empty value, confidence "low" and note "Not found in document".
 - Use "medium" or "low" confidence for blurry, handwritten or ambiguous values and say why.
-- document_type: INVOICE for tax invoices/bills, PURCHASE_ORDER for POs, PAYMENT_RECEIPT for receipts/remittance advices, CREDIT_NOTE for credit notes, otherwise OTHER.`;
+- document_type: INVOICE for tax invoices/bills, PURCHASE_ORDER for POs, PAYMENT_RECEIPT for receipts/remittance advices, CREDIT_NOTE for credit notes, STATEMENT for a statement of account (a ledger listing several invoices, payments and a running or closing balance), otherwise OTHER. For a credit note, invoice_number is the credit note number and invoice_date its date.`;
 
 const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 
