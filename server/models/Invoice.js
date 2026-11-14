@@ -67,7 +67,15 @@ module.exports = (sequelize) => {
     exception_resolved_by: { type: DataTypes.INTEGER },
     exception_resolved_at: { type: DataTypes.DATE },
     matching_tolerance_percent: { type: DataTypes.DECIMAL(5, 2), defaultValue: 5 },
-    matching_details_json: { type: DataTypes.JSON }
+    matching_details_json: { type: DataTypes.JSON },
+    // Approval and exception routing (services/billApproval.service.js)
+    submitted_by: { type: DataTypes.INTEGER, allowNull: true }, // may not also approve the bill
+    exception_type: { type: DataTypes.STRING(20), allowNull: true }, // PRICE | QUANTITY | OTHER
+    exception_stage: { type: DataTypes.STRING(30), allowNull: true }, // PROCUREMENT_REVIEW | RECEIPT_REVIEW | FINANCE_REVIEW
+    exception_reason_code: { type: DataTypes.STRING(40), allowNull: true },
+    exception_review_note: { type: DataTypes.STRING(500), allowNull: true },
+    exception_reviewed_by: { type: DataTypes.INTEGER, allowNull: true },
+    exception_reviewed_at: { type: DataTypes.DATE, allowNull: true }
   }, {
     sequelize,
     modelName: 'Invoice',

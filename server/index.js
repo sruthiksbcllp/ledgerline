@@ -200,7 +200,8 @@ app.use('/api/workflow-events', require('./routes/workflowEvents.routes')); // A
 // Finance & Compliance
 app.use('/api/tds', require('./routes/tds.routes'));
 app.use('/api/msme-payments', require('./routes/msmePayments.routes')); // MSME 45-day payment rule: due, overdue and paid-late invoices
-app.use('/api/bill-inbox', require('./routes/billInbox.routes')); // bills captured from email, sorted and matched for review
+app.use('/api/bill-inbox', require('./routes/billInbox.routes'));
+app.use('/api/bill-approvals', require('./routes/billApprovals.routes')); // bills waiting for approval by amount, and routed exceptions // bills captured from email, sorted and matched for review
 
 // Enterprise Audit Module (Consolidated)
 // NOTE: /api/audit/plans removed — duplicate of /api/audit-plans (same routes file)

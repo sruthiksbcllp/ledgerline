@@ -1590,6 +1590,7 @@ async function recordInvoice(body, req) {
       payment_blocked: !match.matched,
       payment_block_reason: match.matched ? null : `3-way match exception: ${match.error}`,
       exception_status: match.matched ? 'NONE' : 'OPEN',
+      submitted_by: req?.user?.id || null,
       client_id: clientId
     };
 
@@ -1680,6 +1681,9 @@ exports.resolveInvoiceException = async (req, res, next) => {
 
     if (!['MANUAL_APPROVE', 'REJECT'].includes(String(action || '').toUpperCase())) {
       return error(res, 'Invalid action. Use MANUAL_APPROVE or REJECT', 400);
+    }
+    if (!require('../services/billApproval.service').decides(req.user)) {
+      return error(res, 'Only Finance or the Director / CFO decide invoice exceptions (Bill Approvals page)', 403);
     }
 
     const isManualApprove = String(action).toUpperCase() === 'MANUAL_APPROVE';
@@ -1779,6 +1783,8 @@ exports.approveInvoiceForPayment = async (req, res, next) => {
     if (!invoice) throw new AppError('Invoice not found', 404);
     if (invoice.payment_blocked) return error(res, invoice.payment_block_reason || 'Invoice is payment-blocked', 400);
     if (invoice.matching_status === 'MISMATCHED') return error(res, 'Invoice has a 3-way match mismatch — resolve before approving for payment.', 400);
+    const approvalBlocked = require('../services/billApproval.service').approvalBlock(invoice, req.user);
+    if (approvalBlocked) return error(res, approvalBlocked, 403);
     await invoice.update({ status: 'APPROVED_FOR_PAYMENT', approved_by: req.user?.id || null, approved_at: new Date() });
     logActivity({ module: 'PROCUREMENT', action: 'INVOICE_APPROVED_FOR_PAYMENT', user_id: req.user?.id, client_id: req.user?.client_id, metadata: { invoice_id: invoice.id } }).catch(() => {});
     return success(res, invoice, 'Invoice approved for payment');

@@ -31,6 +31,7 @@ const GlobalSettings = lazy(() => import('./pages/GlobalSettings'));
 const Logout = lazy(() => import('./pages/Logout'));
 
 const ApprovalInbox = lazy(() => import('./pages/ApprovalInbox'));
+const BillApprovals = lazy(() => import('./pages/BillApprovals'));
 const ManageProperties = lazy(() => import('./pages/ManageProperties'));
 const AddProperty = lazy(() => import('./pages/AddProperty'));
 const ManagePropertyTypes = lazy(() => import('./pages/ManagePropertyTypes'));
@@ -172,6 +173,7 @@ function App() {
               <Route path="/procurement/grn" element={<GRNManagement />} />
               <Route path="/procurement/ses" element={<ServiceEntrySheets />} />
               <Route path="/procurement/purchase-returns" element={<PurchaseReturns />} />
+              <Route path="/bill-approvals" element={<BillApprovals />} />
               <Route path="/procurement/gate-entry" element={<GateEntryManagement />} />
               <Route path="/procurement/invoices" element={<InvoiceProcessing />} />
               <Route path="/finance/three-way-match" element={<ThreeWayMatch />} />

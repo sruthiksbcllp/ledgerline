@@ -366,6 +366,8 @@ const MainLayout = ({ children }) => {
         features?.ENABLE_INVOICE_MODULE === false
           ? { key: '/finance/ap/ai-invoices', icon: <ReceiptIndianRupee size={16} />, label: 'Invoices', hidden: !canSeeApAutomation }
           : { key: '/procurement/invoices', icon: <ReceiptIndianRupee size={16} />, label: 'Invoices', hidden: !canSeeProcurement && !canSeeApAutomation },
+        // Bills waiting for each approver (by amount) and exceptions routed to Procurement / Warehouse / Finance.
+        { key: '/bill-approvals', icon: <CheckSquare size={16} />, label: 'Bill Approvals', hidden: !canSeeFinance && !['MANAGER','FINANCE','DIRECTOR_CFO','PROCUREMENT','WAREHOUSE','ACCOUNTS_PAYABLE'].includes(normalizedRole) },
         { key: '/finance/three-way-match', icon: <GitMerge size={16} />, label: '3-Way Match', hidden: !canSeeFinance },
         { key: '/finance/ap-accounting-entry', icon: <BookOpen size={16} />, label: 'AP Journal', hidden: !canSeeApJournal },
         { key: '/finance/ap-management', icon: <Scale size={16} />, label: 'Accounts Payable Management', hidden: !canSeeFinance },

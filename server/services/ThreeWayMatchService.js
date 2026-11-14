@@ -288,7 +288,9 @@ class ThreeWayMatchService {
       payment_blocked: !matched,
       payment_block_reason: matched ? null : ((match && match.blocked_reason) || '3-way match variance'),
       exception_status: matched ? 'NONE' : 'OPEN',
-      matching_exception_details: matched ? null : ((match && match.blocked_reason) || null)
+      matching_exception_details: matched ? null : ((match && match.blocked_reason) || null),
+      // Who acts on the exception next (price -> Procurement, quantity -> Warehouse, else Finance)
+      ...require('./billApproval.service').routingFor(match)
     };
   }
 
@@ -305,7 +307,13 @@ class ThreeWayMatchService {
     for (const inv of invoices) {
       if (toNumber(inv.paid_amount) > 0) continue;
       const m = await this.createOrUpdateMatch(inv.id, inv.client_id);
-      await inv.update(this.invoiceFieldsFor(m));
+      const fields = this.invoiceFieldsFor(m);
+      if (m.status !== 'MATCHED' && inv.exception_reviewed_at) {
+        // Still an exception, and someone already reviewed it: keep their review, update the reasons only.
+        await inv.update({ payment_block_reason: fields.payment_block_reason, matching_exception_details: fields.matching_exception_details });
+      } else {
+        await inv.update(fields);
+      }
       if (m.status === 'MATCHED') cleared += 1;
     }
     return { checked: invoices.length, cleared };

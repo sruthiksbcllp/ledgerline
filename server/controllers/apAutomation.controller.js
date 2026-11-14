@@ -232,7 +232,8 @@ async function submitApInvoice(req, body, { auto = false } = {}) {
         status: 'UNPAID',
         matching_status: 'PENDING',
         paid_amount: 0,
-        source: body.source === 'AI_EXTRACTED' ? 'AI_EXTRACTED' : 'MANUAL'
+        source: body.source === 'AI_EXTRACTED' ? 'AI_EXTRACTED' : 'MANUAL',
+        submitted_by: req.user?.id || null
       }, { transaction });
       if (data.line_items.length) {
         await ApInvoiceLine.bulkCreate(data.line_items.map((l, i) => ({
@@ -272,8 +273,12 @@ async function submitApInvoice(req, body, { auto = false } = {}) {
       try {
         const ThreeWayMatchService = require('../services/ThreeWayMatchService');
         const m = await ThreeWayMatchService.createOrUpdateMatch(invoice.id, clientId);
-        await invoice.update(ThreeWayMatchService.invoiceFieldsFor(m));
-        if (m.status !== 'MATCHED') message = 'Invoice saved with a 3-way match exception: payment is blocked until Finance resolves it';
+        const fields = ThreeWayMatchService.invoiceFieldsFor(m);
+        await invoice.update(fields);
+        if (m.status !== 'MATCHED') {
+          const { STAGES } = require('../services/billApproval.service');
+          message = `Invoice saved with a 3-way match exception and sent for ${STAGES[fields.exception_stage]?.label || 'Finance review'}; payment is blocked until it is resolved`;
+        }
       } catch (e) { console.error('[ap-invoice] 3-way match failed:', e.message); }
     }
     return out(201, { success: true, message, data: invoice, checks: review.checks });
@@ -340,6 +345,8 @@ exports.approve = async (req, res) => {
   if (invoice.payment_blocked || invoice.matching_status === 'MISMATCHED') {
     return fail(res, 409, 'This invoice has an open matching exception. Resolve it before approving.');
   }
+  const blocked = require('../services/billApproval.service').approvalBlock(invoice, req.user);
+  if (blocked) return fail(res, 403, blocked);
   const before = invoice.toJSON();
   await invoice.update({ status: 'APPROVED_FOR_PAYMENT', approved_by: req.user.id, approved_at: new Date() });
   await recordAudit(req, { module: 'AP', entityType: 'INVOICE', entityId: invoice.id, action: 'AP_INVOICE_APPROVED', before, after: invoice, note: req.body?.comment || null });
