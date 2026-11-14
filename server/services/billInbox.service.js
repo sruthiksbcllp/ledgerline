@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { Op, fn, col, where: sqlWhere } = require('sequelize');
 const {
-  BillInboxSource, BillInboxItem, UserMailAccount, Vendor, PurchaseOrder, PurchaseRequisition, PurchaseReturn
+  BillInboxSource, BillInboxItem, UserMailAccount, Vendor, PurchaseOrder, PurchaseOrderItem, PurchaseRequisition, PurchaseReturn
 } = require('../models');
 const { extractInvoice, normalizeDate, toNumber } = require('./invoiceExtraction.service');
 const { ExtractionError, sniffType } = require('./vendorExtraction.service');
@@ -115,6 +115,11 @@ async function sortAndMatch(clientId, result, { fromEmail, itemId = null }) {
   if (!po && vendor && type === 'INVOICE') {
     const open = await PurchaseOrder.findAll({ where: { ...tenantWhere, vendor_id: vendor.id, status: { [Op.in]: OPEN_PO_STATUSES } }, limit: 2 });
     if (open.length === 1) { po = open[0]; poMatchedBy = 'ONLY_OPEN_PO'; }
+  }
+  if (po && Array.isArray(result.line_items) && result.line_items.length) {
+    const ThreeWayMatchService = require('./ThreeWayMatchService');
+    const poItems = await PurchaseOrderItem.findAll({ where: { po_id: po.id }, attributes: ['id', 'item_name', 'unit_price'] });
+    ThreeWayMatchService.suggestPoLines(poItems, result.line_items).forEach((id, i) => { result.line_items[i].po_item_id = id; });
   }
   const pr = po?.pr_id ? await PurchaseRequisition.findOne({ where: { id: po.pr_id }, attributes: ['id', 'department_id', 'requested_by_user_id'] }) : null;
 
@@ -251,8 +256,8 @@ const usableAttachment = (a) => a['@odata.type'] === '#microsoft.graph.fileAttac
   && a.size <= MAX_FILE_BYTES && (NAME_EXT.test(a.name || '') || FILE_EXT[lower(a.contentType)]);
 
 /**
- * Checks one mailbox for new bills. Returns { captured, skipped } counts. Safe to call while another
- * check of the same mailbox is running (the second one returns at once).
+ * Checks one mailbox for new bills. Returns { captured, more } (more: stopped at the per-check limit),
+ * or { busy: true } if this mailbox is already being checked, or { error } if the check failed.
  */
 async function checkSource(source) {
   if (running.has(source.id)) return { captured: 0, busy: true };
@@ -342,13 +347,13 @@ async function checkSource(source) {
 /** Scheduler entry point: checks every enabled mailbox, one after another. */
 async function checkAll() {
   const sources = await BillInboxSource.findAll({ where: { enabled: true } });
-  for (const s of sources) await checkSource(s); // eslint-disable-line no-await-in-loop
+  for (const s of sources) await checkSource(s);
 }
 
 /** Starts a check of this company's enabled mailboxes in the background. */
 function checkClientNow(clientId) {
   BillInboxSource.findAll({ where: { client_id: clientId, enabled: true } })
-    .then(async (sources) => { for (const s of sources) await checkSource(s); }) // eslint-disable-line no-await-in-loop
+    .then(async (sources) => { for (const s of sources) await checkSource(s); })
     .catch((e) => console.error('[bill-inbox] manual check failed:', e.message));
 }
 

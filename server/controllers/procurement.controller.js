@@ -1359,6 +1359,8 @@ exports.createGateEntry = async (req, res) => {
     await po.update({ status: isFullyReceived ? 'RECEIVED' : 'PARTIAL_RECEIVED' }, { transaction });
 
     await transaction.commit();
+    // Bills that were waiting for these goods: re-run their 3-way match (never blocks the GRN).
+    require('../services/ThreeWayMatchService').rematchOpenForPo(po.id, po.client_id).catch(() => {});
 
     // Update Capex actual_spend if PO is linked to a Capex request
     if (grn) {
@@ -1418,17 +1420,8 @@ async function assertSesInvoiceable(sesId, { clientId, poId, exceptInvoiceId } =
   return ses;
 }
 
-function matchToInvoiceFields(match) {
-  const matched = match && match.status === 'MATCHED';
-  return {
-    matching_status: matched ? 'MATCHED' : 'MISMATCHED',
-    status: matched ? 'UNPAID' : 'EXCEPTION',
-    payment_blocked: !matched,
-    payment_block_reason: matched ? null : ((match && match.blocked_reason) || '3-way match variance'),
-    exception_status: matched ? 'NONE' : 'OPEN',
-    matching_exception_details: matched ? null : ((match && match.blocked_reason) || null)
-  };
-}
+// Same rule everywhere a bill is matched (manual invoices here, AI bills, re-checks after receipts).
+const matchToInvoiceFields = (match) => require('../services/ThreeWayMatchService').invoiceFieldsFor(match);
 
 exports.createInvoice = async (req, res, next) => {
   try {

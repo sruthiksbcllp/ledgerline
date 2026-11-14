@@ -7,7 +7,7 @@
  */
 const { Op, fn, col, where: sqlWhere } = require('sequelize');
 const {
-  sequelize, Invoice, ApInvoiceLine, ApPayment, Vendor, PurchaseOrder, Property, BillInboxItem
+  sequelize, Invoice, ApInvoiceLine, ApPayment, Vendor, PurchaseOrder, PurchaseOrderItem, Property, BillInboxItem
 } = require('../models');
 const { buildAdminWhere, getClientId } = require('../utils/tenantFilter');
 const { extractInvoice, checkInvoiceNumbers, normalizeDate, toNumber } = require('../services/invoiceExtraction.service');
@@ -79,7 +79,8 @@ async function reviewInvoice(req, body, excludeId = null) {
       quantity: toNumber(l.quantity),
       unit_price: toNumber(l.unit_price),
       amount: toNumber(l.amount) ?? round2((toNumber(l.quantity) ?? 0) * (toNumber(l.unit_price) ?? 0)),
-      tax_rate_percent: toNumber(l.tax_rate_percent)
+      tax_rate_percent: toNumber(l.tax_rate_percent),
+      po_item_id: l.po_item_id ? Number(l.po_item_id) : null
     })).filter((l) => l.description || l.amount)
   };
 
@@ -100,6 +101,18 @@ async function reviewInvoice(req, body, excludeId = null) {
   }
   if (!data.property_id && !po?.property_id) add('property_id', 'error', 'Select the property / site this bill belongs to');
   if (!data.po_id) add('po_id', 'warning', 'No purchase order linked: the bill will not be 3-way matched');
+
+  // Three-way match before saving: received and not yet billed on the PO, line by line. Shown as warnings;
+  // a bill that fails is saved as a match exception with payment blocked.
+  if (po && vendor && Number(po.vendor_id) === Number(vendor.id) && preTax) {
+    const ThreeWayMatchService = require('../services/ThreeWayMatchService');
+    const lineIds = new Set((await PurchaseOrderItem.findAll({ where: { po_id: po.id }, attributes: ['id'] })).map((i) => i.id));
+    data.line_items.forEach((l, i) => {
+      if (l.po_item_id && !lineIds.has(l.po_item_id)) add(`line_items.${i}`, 'error', `Line ${i + 1} is linked to a line that is not on PO ${po.po_number}`);
+    });
+    const m = await ThreeWayMatchService.evaluate({ clientId: po.client_id, poId: po.id, invoiceBase: preTax, lines: data.line_items, excludeInvoiceId: excludeId });
+    m.issues.forEach((msg) => add('match', 'warning', `3-way match: ${msg}`));
+  }
 
   // GST checks from what is printed on the bill (sent with AI-read bills): GSTIN, addressed to us, IGST vs CGST/SGST, IRN.
   const { cleanFacts, gstIssues } = require('../services/billGstChecks.service');
@@ -124,6 +137,11 @@ exports.extract = async (req, res) => {
     let po = null;
     if (result.header.po_number.value) {
       po = await PurchaseOrder.findOne({ where: { ...tenantWhere, po_number: result.header.po_number.value.trim() }, attributes: ['id', 'po_number', 'vendor_id', 'property_id', 'total_amount', 'status'] });
+    }
+    if (po && result.line_items.length) {
+      const ThreeWayMatchService = require('../services/ThreeWayMatchService');
+      const poItems = await PurchaseOrderItem.findAll({ where: { po_id: po.id }, attributes: ['id', 'item_name', 'unit_price'] });
+      ThreeWayMatchService.suggestPoLines(poItems, result.line_items).forEach((id, i) => { result.line_items[i].po_item_id = id; });
     }
     const { exact, similar } = await findDuplicates(tenantWhere, {
       vendor_id: vendorMatch.vendor?.id,
@@ -185,6 +203,14 @@ async function submitApInvoice(req, body, { auto = false } = {}) {
   const vendorTax = reverseCharge ? 0 : data.tax_amount;
   try {
     const invoice = await sequelize.transaction(async (transaction) => {
+      if (inboxItem) {
+        const locked = await BillInboxItem.findOne({ where: { id: inboxItem.id }, transaction, lock: transaction.LOCK.UPDATE });
+        if (!locked || !['NEW', 'FAILED', 'DUPLICATE', 'SET_ASIDE'].includes(locked.status)) {
+          const err = new Error(locked?.invoice_id ? `This bill was already accepted (invoice #${locked.invoice_id})` : 'This bill has already been dealt with in the bill inbox');
+          err.status = 409;
+          throw err;
+        }
+      }
       const created = await Invoice.create({
         client_id: clientId,
         vendor_id: vendor.id,
@@ -211,7 +237,8 @@ async function submitApInvoice(req, body, { auto = false } = {}) {
       if (data.line_items.length) {
         await ApInvoiceLine.bulkCreate(data.line_items.map((l, i) => ({
           client_id: clientId, invoice_id: created.id, line_no: i + 1, description: l.description || `Line ${i + 1}`,
-          quantity: l.quantity, unit_price: l.unit_price, amount: l.amount ?? 0, tax_rate_percent: l.tax_rate_percent
+          quantity: l.quantity, unit_price: l.unit_price, amount: l.amount ?? 0, tax_rate_percent: l.tax_rate_percent,
+          po_item_id: l.po_item_id || null
         })), { transaction });
       }
       if (inboxItem) {
@@ -239,9 +266,20 @@ async function submitApInvoice(req, body, { auto = false } = {}) {
         submitted: { vendor_id: vendor.id, po_id: po?.id || null, invoice_number: data.invoice_number, invoice_date: data.invoice_date, due_date: data.due_date, subtotal, tax_amount: data.tax_amount, total_amount: data.total_amount }
       }).catch((e) => console.error('[ap-ai-review]', e.message));
     }
-    return out(201, { success: true, message: 'Invoice submitted for approval', data: invoice, checks: review.checks });
+    // Three-way match on the saved bill (bills without a PO are not matched, as before).
+    let message = 'Invoice submitted for approval';
+    if (invoice.po_id) {
+      try {
+        const ThreeWayMatchService = require('../services/ThreeWayMatchService');
+        const m = await ThreeWayMatchService.createOrUpdateMatch(invoice.id, clientId);
+        await invoice.update(ThreeWayMatchService.invoiceFieldsFor(m));
+        if (m.status !== 'MATCHED') message = 'Invoice saved with a 3-way match exception: payment is blocked until Finance resolves it';
+      } catch (e) { console.error('[ap-invoice] 3-way match failed:', e.message); }
+    }
+    return out(201, { success: true, message, data: invoice, checks: review.checks });
   } catch (error) {
     if (error.name === 'SequelizeUniqueConstraintError') return out(409, { success: false, message: 'This invoice number is already recorded for this vendor.' });
+    if (error.status === 409) return out(409, { success: false, message: error.message });
     return out(500, { success: false, message: error.message || 'Could not save the invoice' });
   }
 }

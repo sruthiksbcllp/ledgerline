@@ -272,6 +272,8 @@ exports.createGRN = async (req, res, next) => {
     await po.update({ status: isFullyReceived ? 'RECEIVED' : 'PARTIAL_RECEIVED' }, { transaction });
 
     await transaction.commit();
+    // Bills that were waiting for these goods: re-run their 3-way match (never blocks the GRN).
+    require('../services/ThreeWayMatchService').rematchOpenForPo(po.id, po.client_id).catch(() => {});
 
     // GL Integration — post acquisition JV (non-blocking, no-op if toggle OFF)
     try {

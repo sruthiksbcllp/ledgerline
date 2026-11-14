@@ -21,8 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const { Op } = require('sequelize');
 const {
-  ApAutoSubmitSetting, ApAiReview, BillInboxItem, BillInboxSource, Invoice, Vendor, PurchaseOrder, PurchaseOrderItem,
-  GRN, GRNItem, ServiceEntrySheet, PurchaseReturn, PurchaseReturnItem, User
+  ApAutoSubmitSetting, ApAiReview, BillInboxItem, BillInboxSource, Invoice, Vendor, PurchaseOrder, User
 } = require('../models');
 const { normalizeDate, toNumber } = require('./invoiceExtraction.service');
 
@@ -113,14 +112,23 @@ function correctedFields(read, submitted) {
   return out;
 }
 
-/** The invoice as it was saved, to notice later edits of an auto-submitted invoice. */
+/**
+ * The invoice as stored, to notice later edits of an auto-submitted invoice. Always built from a
+ * database read (invoice_date is a date-time column), so the saved and current snapshots compare alike.
+ */
+const SNAPSHOT_FIELDS = ['id', 'status', 'invoice_number', 'invoice_date', 'vendor_id', 'po_id', 'base_amount', 'total_amount'];
 const invoiceSnapshot = (inv) => ({
-  invoice_number: inv.invoice_number, invoice_date: normalizeDate(inv.invoice_date), vendor_id: inv.vendor_id, po_id: inv.po_id,
-  base_amount: round2(inv.base_amount), total_amount: round2(inv.total_amount)
+  invoice_number: inv.invoice_number,
+  invoice_date: inv.invoice_date ? new Date(inv.invoice_date).toISOString() : null,
+  vendor_id: inv.vendor_id,
+  po_id: inv.po_id,
+  base_amount: round2(inv.base_amount),
+  total_amount: round2(inv.total_amount)
 });
 
 async function recordReview({ clientId, invoice, read, submitted, inboxItemId, channel, auto }) {
   const corrected = auto ? [] : correctedFields(read, submitted);
+  const stored = await Invoice.findByPk(invoice.id, { attributes: SNAPSHOT_FIELDS });
   return ApAiReview.create({
     client_id: clientId,
     vendor_id: invoice.vendor_id,
@@ -129,7 +137,7 @@ async function recordReview({ clientId, invoice, read, submitted, inboxItemId, c
     channel,
     auto_submitted: Boolean(auto),
     read_values: read,
-    submitted_values: { ...submitted, saved: invoiceSnapshot(invoice) },
+    submitted_values: { ...submitted, saved: invoiceSnapshot(stored || invoice) },
     corrected_fields: corrected
   });
 }
@@ -155,7 +163,7 @@ async function trackRecord(clientId, vendorId, needed) {
   if (!vendorId) return { qualified: false, clean: 0, needed, issue: null };
   const rows = await ApAiReview.findAll({
     where: { client_id: clientId, vendor_id: vendorId },
-    include: [{ model: Invoice, as: 'invoice', attributes: ['id', 'status', 'invoice_number', 'invoice_date', 'vendor_id', 'po_id', 'base_amount', 'total_amount'] }],
+    include: [{ model: Invoice, as: 'invoice', attributes: SNAPSHOT_FIELDS }],
     order: [['id', 'DESC']],
     limit: needed
   });
@@ -169,33 +177,6 @@ async function trackRecord(clientId, vendorId, needed) {
 }
 
 // ── Step 2: the clean-bill test ───────────────────────────────────────────
-
-/**
- * Received on the PO (goods accepted less returns, at PO prices, plus approved service entries)
- * that is not billed yet, with the company's three-way-match tolerance.
- */
-async function receivedNotBilled(po, excludeInvoiceId = null) {
-  const items = await PurchaseOrderItem.findAll({ where: { po_id: po.id }, attributes: ['id', 'unit_price'] });
-  const price = new Map(items.map((i) => [i.id, Number(i.unit_price || 0)]));
-  const grns = await GRN.findAll({ where: { po_id: po.id, client_id: po.client_id, status: { [Op.ne]: 'REJECTED' } }, attributes: ['id'] });
-  let goods = 0;
-  if (grns.length) {
-    const grnItems = await GRNItem.findAll({ where: { grn_id: { [Op.in]: grns.map((g) => g.id) } }, attributes: ['id', 'po_item_id', 'accepted_quantity', 'received_quantity'] });
-    grnItems.forEach((gi) => { goods += Number(gi.accepted_quantity ?? gi.received_quantity ?? 0) * (price.get(gi.po_item_id) || 0); });
-    const returned = await PurchaseReturnItem.findAll({
-      attributes: ['amount'],
-      include: [{ model: PurchaseReturn, as: 'purchaseReturn', attributes: [], where: { grn_id: { [Op.in]: grns.map((g) => g.id) } } }]
-    }).catch(() => []);
-    goods -= returned.reduce((s, r) => s + Number(r.amount || 0), 0);
-  }
-  const services = Number(await ServiceEntrySheet.sum('total_value', { where: { po_id: po.id, client_id: po.client_id, status: 'APPROVED' } }) || 0);
-  const billed = Number(await Invoice.sum('base_amount', {
-    where: { po_id: po.id, client_id: po.client_id, status: { [Op.ne]: 'REJECTED' }, ...(excludeInvoiceId ? { id: { [Op.ne]: excludeInvoiceId } } : {}) }
-  }) || 0);
-  const ThreeWayMatchService = require('./ThreeWayMatchService');
-  const rule = await ThreeWayMatchService.getActiveRule(po.client_id);
-  return { received: round2(goods + services), billed: round2(billed), rule };
-}
 
 /**
  * The clean-bill test for one captured bill. Returns { clean, reasons }. Reasons are written for the
@@ -242,11 +223,12 @@ async function cleanCheck(item, settings) {
     if (!po.property_id) add(`PO ${po.po_number} has no property / site`);
     if (preTax != null && Number(po.total_amount) > 0 && preTax > Number(po.total_amount) * 1.02) add(`Bill is more than the value of PO ${po.po_number}`);
     if (preTax != null) {
-      const { received, billed, rule } = await receivedNotBilled(po);
-      const open = round2(received - billed);
-      const allowance = Math.max(open * (Number(rule.tolerance_pct || 0) / 100), Number(rule.tolerance_amount || 0));
-      if (received <= 0) add(`Nothing received yet on PO ${po.po_number} (no goods receipt or approved service entry)`);
-      else if (preTax > open + allowance + 1) add(`Bill (${inr(preTax)} before GST) is more than what was received and not yet billed on PO ${po.po_number} (${inr(Math.max(open, 0))})`);
+      // The same three-way match the bill will get when saved: totals and every line.
+      const ThreeWayMatchService = require('./ThreeWayMatchService');
+      const lines = x.line_items || [];
+      const match = await ThreeWayMatchService.evaluate({ clientId: item.client_id, poId: po.id, invoiceBase: preTax, lines });
+      match.issues.forEach(add);
+      lines.forEach((l, i) => { if (!l.po_item_id && Number(l.amount || 0) > 0) add(`Line ${i + 1}${l.description ? ` (${String(l.description).slice(0, 40)})` : ''} could not be matched to a line on PO ${po.po_number}`); });
     }
   }
 
@@ -363,7 +345,7 @@ async function evaluate(item, { allowSubmit = true } = {}) {
 /** Re-runs the test (without submitting) on open bills, e.g. after the settings change. */
 async function recheckOpen(clientId) {
   const items = await BillInboxItem.findAll({ where: { client_id: clientId, status: 'NEW', document_type: 'INVOICE' }, limit: 300 });
-  for (const item of items) await evaluate(item, { allowSubmit: false }); // eslint-disable-line no-await-in-loop
+  for (const item of items) await evaluate(item, { allowSubmit: false });
 }
 
 // ── Figures for the settings screen ───────────────────────────────────────
@@ -373,7 +355,7 @@ async function stats(clientId, settings) {
   const rows = await ApAiReview.findAll({
     where: { client_id: clientId, created_at: { [Op.gte]: since } },
     include: [
-      { model: Invoice, as: 'invoice', attributes: ['id', 'status', 'invoice_number', 'invoice_date', 'vendor_id', 'po_id', 'base_amount', 'total_amount'] },
+      { model: Invoice, as: 'invoice', attributes: SNAPSHOT_FIELDS },
       { model: Vendor, as: 'vendor', attributes: ['id', 'vendor_name'] }
     ],
     order: [['id', 'DESC']]
@@ -390,7 +372,7 @@ async function stats(clientId, settings) {
   const vendorIds = [...new Set(rows.map((r) => r.vendor_id).filter(Boolean))];
   const vendors = [];
   for (const id of vendorIds) {
-    const tr = await trackRecord(clientId, id, settings.track_record); // eslint-disable-line no-await-in-loop
+    const tr = await trackRecord(clientId, id, settings.track_record);
     const name = rows.find((r) => r.vendor_id === id)?.vendor?.vendor_name || `Vendor #${id}`;
     vendors.push({ vendor_id: id, vendor_name: name, qualified: tr.qualified, clean: tr.clean, needed: tr.needed, issue: tr.issue });
   }

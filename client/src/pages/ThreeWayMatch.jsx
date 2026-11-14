@@ -26,6 +26,8 @@ const extractList = (res) => {
   return [];
 };
 
+const inrText = (v) => (v == null ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
+
 const ThreeWayMatch = () => {
   const [loading, setLoading] = useState(false);
   const [invoices, setInvoices] = useState([]);
@@ -80,7 +82,7 @@ const ThreeWayMatch = () => {
       form.setFieldsValue(row);
     } else {
       form.resetFields();
-      form.setFieldsValue({ applies_to: 'BOTH', tolerance_pct: 5, tolerance_amount: 0, is_active: true });
+      form.setFieldsValue({ applies_to: 'BOTH', tolerance_pct: 5, tolerance_amount: 0, price_tolerance_pct: 1, price_tolerance_amount: 100, qty_tolerance_pct: 0, is_active: true });
     }
     setRuleModalOpen(true);
   };
@@ -134,8 +136,9 @@ const ThreeWayMatch = () => {
   const ruleColumns = useMemo(() => ([
     { title: 'Rule', dataIndex: 'rule_name', key: 'rule_name' },
     { title: 'Applies To', dataIndex: 'applies_to', key: 'applies_to' },
-    { title: 'Tolerance %', dataIndex: 'tolerance_pct', key: 'tolerance_pct' },
-    { title: 'Tolerance Amount', dataIndex: 'tolerance_amount', key: 'tolerance_amount' },
+    { title: 'Bill total', key: 'total', render: (_, r) => `${Number(r.tolerance_pct)}%${Number(r.tolerance_amount) ? ` or ₹${Number(r.tolerance_amount)}` : ''}` },
+    { title: 'Line price', key: 'price', render: (_, r) => `${Number(r.price_tolerance_pct ?? 1)}%${Number(r.price_tolerance_amount ?? 100) ? ` or ₹${Number(r.price_tolerance_amount ?? 100)} (lower)` : ''}` },
+    { title: 'Line qty', key: 'qty', render: (_, r) => (Number(r.qty_tolerance_pct ?? 0) ? `${Number(r.qty_tolerance_pct)}%` : 'Exact') },
     { title: 'Active', key: 'is_active', render: (_, r) => (r.is_active ? 'Yes' : 'No') },
     { title: 'Actions', key: 'edit', render: (_, r) => <Tooltip title="Edit"><Button type="text" size="small" icon={<Edit2 size={15} color="var(--color-navy)" />} onClick={() => openRuleModal(r)} /></Tooltip> }
   ]), [openRuleModal]);
@@ -190,9 +193,15 @@ const ThreeWayMatch = () => {
                 { label: 'PO Number', value: selectedRow.PurchaseOrder?.po_number || '-' },
                 selectedRow.ServiceEntrySheet
                   ? { label: 'Service Entry Sheet', value: selectedRow.ServiceEntrySheet.ses_number }
-                  : { label: 'GRN Number', value: selectedRow.GRN?.grn_number || '-' },
+                  : { label: 'GRN Number', value: selectedRow.GRN?.grn_number || 'All receipts on the PO' },
                 { label: 'PO Amount', value: selectedRow.PurchaseOrder?.total_amount || '-' },
                 { label: 'Invoice Amount', value: selectedRow.total_amount || '-' },
+                ...(selectedRow.ThreeWayMatch?.details ? [
+                  { label: 'Received on PO (before GST)', value: inrText(selectedRow.ThreeWayMatch.details.received_value) },
+                  { label: 'Billed earlier on PO', value: inrText(selectedRow.ThreeWayMatch.details.billed_before) },
+                  { label: 'Open to bill', value: inrText(selectedRow.ThreeWayMatch.details.open_value) },
+                  { label: 'This bill (before GST)', value: inrText(selectedRow.ThreeWayMatch.details.invoice_base) },
+                ] : []),
                 { label: 'Qty Variance', value: selectedRow.ThreeWayMatch?.qty_variance ?? '-' },
                 { label: 'Amount Variance', value: selectedRow.ThreeWayMatch?.amount_variance ?? '-' },
                 { label: 'Tolerance %', value: selectedRow.ThreeWayMatch?.tolerance_pct ?? '-' }
@@ -207,8 +216,25 @@ const ThreeWayMatch = () => {
                 <Alert
                   style={{ marginTop: 12 }}
                   type="warning"
-                  message={selectedRow.ThreeWayMatch.blocked_reason}
                   showIcon
+                  message="Why the match failed"
+                  description={<ul style={{ margin: 0, paddingLeft: 18 }}>{String(selectedRow.ThreeWayMatch.blocked_reason).split('; ').map((r) => <li key={r}>{r}</li>)}</ul>}
+                />
+              )}
+              {selectedRow.ThreeWayMatch?.details?.lines?.some((l) => l.po_item_id) && (
+                <Table
+                  style={{ marginTop: 12 }}
+                  size="small"
+                  pagination={false}
+                  rowKey="line_no"
+                  dataSource={selectedRow.ThreeWayMatch.details.lines}
+                  columns={[
+                    { title: '#', dataIndex: 'line_no', width: 40 },
+                    { title: 'Bill line', dataIndex: 'description', render: (v, l) => <div>{v}<div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{l.item_name ? `PO line: ${l.item_name}` : 'Not linked to a PO line'}</div></div> },
+                    { title: 'Qty / open', key: 'qty', render: (_, l) => (l.po_item_id ? `${l.qty ?? '—'} / ${l.open_qty ?? '—'}` : '—') },
+                    { title: 'Rate / PO rate', key: 'rate', render: (_, l) => (l.po_item_id ? `${l.unit_price != null ? inrText(l.unit_price) : '—'} / ${inrText(l.po_price)}` : '—') },
+                    { title: '', key: 'ok', render: (_, l) => (!l.po_item_id ? null : l.issues?.length ? <Tag color="error">Mismatch</Tag> : <Tag color="success">OK</Tag>) },
+                  ]}
                 />
               )}
               <div style={{ marginTop: 20 }}>
@@ -231,11 +257,22 @@ const ThreeWayMatch = () => {
             <Form.Item name="applies_to" label="Applies To" rules={[{ required: true }]}>
               <Input placeholder="QTY / AMOUNT / BOTH" />
             </Form.Item>
-            <Form.Item name="tolerance_pct" label="Tolerance %" rules={[{ required: true }]}>
+            <Form.Item name="tolerance_pct" label="Bill total: tolerance %" rules={[{ required: true }]}
+              extra="The bill before GST may exceed what was received and not yet billed by this much (or the amount below, whichever is larger).">
               <InputNumber style={{ width: '100%' }} min={0} max={100} />
             </Form.Item>
-            <Form.Item name="tolerance_amount" label="Tolerance Amount">
+            <Form.Item name="tolerance_amount" label="Bill total: tolerance amount (₹)">
               <InputNumber style={{ width: '100%' }} min={0} />
+            </Form.Item>
+            <Form.Item name="price_tolerance_pct" label="Each line: rate above PO price, %"
+              extra="A line's rate may be above the PO price by this % or the amount below, whichever is lower.">
+              <InputNumber style={{ width: '100%' }} min={0} max={100} />
+            </Form.Item>
+            <Form.Item name="price_tolerance_amount" label="Each line: rate above PO price, amount (₹)">
+              <InputNumber style={{ width: '100%' }} min={0} />
+            </Form.Item>
+            <Form.Item name="qty_tolerance_pct" label="Each line: quantity above received, %" extra="0 = quantity must not exceed what was received and not yet billed.">
+              <InputNumber style={{ width: '100%' }} min={0} max={100} />
             </Form.Item>
           </Form>
         </Modal>

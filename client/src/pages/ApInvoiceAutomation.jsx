@@ -309,6 +309,32 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
     .filter((p) => !selectedVendor || Number(p.vendor_id) === Number(selectedVendor))
     .map((p) => ({ value: p.id, label: `${p.po_number}${p.total_amount ? ` · ${inr(p.total_amount)}` : ''}` }));
 
+  // Lines of the selected PO, so each bill line can be linked to one (line-level 3-way match).
+  const selectedPo = Form.useWatch('po_id', form);
+  const [poItems, setPoItems] = useState([]);
+  useEffect(() => {
+    if (!selectedPo) { setPoItems([]); return; }
+    let cancelled = false;
+    api.get(`/procurement/po/${selectedPo}`)
+      .then((res) => {
+        if (cancelled) return;
+        const items = res?.data?.data?.items || res?.data?.items || [];
+        setPoItems(items);
+        // Keep links that belong to this PO; a one-line bill on a one-line PO is linked automatically.
+        const lines = form.getFieldValue('line_items') || [];
+        const ids = new Set(items.map((i) => i.id));
+        const next = lines.map((l) => {
+          if (!l) return l;
+          if (l.po_item_id && ids.has(l.po_item_id)) return l;
+          return { ...l, po_item_id: items.length === 1 && lines.length === 1 ? items[0].id : undefined };
+        });
+        if (lines.length) { form.setFieldValue('line_items', next); scheduleValidate(); }
+      })
+      .catch(() => { if (!cancelled) setPoItems([]); });
+    return () => { cancelled = true; };
+  }, [selectedPo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const poItemOptions = poItems.map((i) => ({ value: i.id, label: `${i.item_name} · ${inr(i.unit_price)} × ${Number(i.quantity)}` }));
+
   // ── Detail actions ────────────────────────────────────────────────────────
   const openDetail = async (id) => {
     try {
@@ -539,12 +565,22 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
             </Row>
 
             <Text strong>Line items</Text>
+            {poItems.length > 0 && (
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>Link each line to its PO line: quantity and rate are checked against what was received and the PO price.</Text>
+            )}
             <Form.List name="line_items">
               {(fields, { add, remove }) => (
                 <div style={{ marginTop: 8, marginBottom: 16 }}>
                   {fields.map((f) => (
                     <Row gutter={8} key={f.key} align="top">
                       <Col flex="auto"><Form.Item name={[f.name, 'description']} style={{ marginBottom: 8 }}><Input placeholder="Description" /></Form.Item></Col>
+                      {poItems.length > 0 && (
+                        <Col flex="210px">
+                          <Form.Item name={[f.name, 'po_item_id']} style={{ marginBottom: 8 }}>
+                            <Select allowClear showSearch optionFilterProp="label" placeholder="PO line" options={poItemOptions} popupMatchSelectWidth={false} />
+                          </Form.Item>
+                        </Col>
+                      )}
                       <Col flex="90px"><Form.Item name={[f.name, 'quantity']} style={{ marginBottom: 8 }}><InputNumber placeholder="Qty" style={{ width: '100%' }} min={0} /></Form.Item></Col>
                       <Col flex="130px"><Form.Item name={[f.name, 'unit_price']} style={{ marginBottom: 8 }}><InputNumber placeholder="Rate" style={{ width: '100%' }} min={0} /></Form.Item></Col>
                       <Col flex="140px"><Form.Item name={[f.name, 'amount']} style={{ marginBottom: 8 }}><InputNumber placeholder="Amount" style={{ width: '100%' }} min={0} /></Form.Item></Col>

@@ -43,7 +43,8 @@ exports.saveToleranceRule = async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
-      id, rule_name, tolerance_pct, tolerance_amount, applies_to = 'BOTH', is_active = true
+      id, rule_name, tolerance_pct, tolerance_amount, applies_to = 'BOTH', is_active = true,
+      price_tolerance_pct = 1, price_tolerance_amount = 100, qty_tolerance_pct = 0
     } = req.body || {};
     if (!rule_name) {
       return res.status(400).json({ success: false, message: 'rule_name is required' });
@@ -54,7 +55,10 @@ exports.saveToleranceRule = async (req, res) => {
       tolerance_pct: Number(tolerance_pct || 0),
       tolerance_amount: Number(tolerance_amount || 0),
       applies_to,
-      is_active: Boolean(is_active)
+      is_active: Boolean(is_active),
+      price_tolerance_pct: Math.max(0, Number(price_tolerance_pct || 0)),
+      price_tolerance_amount: Math.max(0, Number(price_tolerance_amount || 0)),
+      qty_tolerance_pct: Math.max(0, Number(qty_tolerance_pct || 0))
     };
 
     let result;
@@ -83,7 +87,7 @@ exports.getInvoiceStatuses = async (req, res) => {
         { model: PurchaseOrder, attributes: ['id', 'po_number', 'total_amount'] },
         { model: GRN, attributes: ['id', 'grn_number'] },
         { model: ServiceEntrySheet, attributes: ['id', 'ses_number', 'total_value'], required: false },
-        { model: ThreeWayMatch, attributes: ['status', 'qty_variance', 'amount_variance', 'tolerance_pct', 'blocked_reason'], required: false }
+        { model: ThreeWayMatch, attributes: ['status', 'qty_variance', 'amount_variance', 'tolerance_pct', 'blocked_reason', 'details'], required: false }
       ],
       order: [['createdAt', 'DESC']]
     });

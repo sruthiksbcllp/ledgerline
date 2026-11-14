@@ -16,7 +16,8 @@ module.exports = (sequelize, DataTypes) => {
     quantity: { type: DataTypes.DECIMAL(15, 3), allowNull: true },
     unit_price: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
     amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 },
-    tax_rate_percent: { type: DataTypes.DECIMAL(5, 2), allowNull: true }
+    tax_rate_percent: { type: DataTypes.DECIMAL(5, 2), allowNull: true },
+    po_item_id: { type: DataTypes.INTEGER, allowNull: true } // the PO line this bill line is for (line-level 3-way match)
   }, {
     sequelize,
     modelName: 'ApInvoiceLine',

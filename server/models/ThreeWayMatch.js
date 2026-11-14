@@ -20,7 +20,8 @@ module.exports = (sequelize, DataTypes) => {
     qty_variance: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
     amount_variance: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
     tolerance_pct: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 0 },
-    blocked_reason: { type: DataTypes.TEXT }
+    blocked_reason: { type: DataTypes.TEXT },
+    details: { type: DataTypes.JSON, allowNull: true } // per-line results and received / billed figures
   }, {
     sequelize,
     modelName: 'ThreeWayMatch',

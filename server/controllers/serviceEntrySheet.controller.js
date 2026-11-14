@@ -332,6 +332,8 @@ const advance = (stageKey) => async (req, res, next) => {
     await transaction.commit();
 
     audit(req, ses, `SES_${stageKey.toUpperCase()}`, { remarks });
+    // Bills that were waiting for this service: re-run their 3-way match (never blocks the approval).
+    if (stageKey === 'approve') require('../services/ThreeWayMatchService').rematchOpenForPo(ses.po_id, ses.client_id).catch(() => {});
 
     const warnings = [];
     let invoice = null;
