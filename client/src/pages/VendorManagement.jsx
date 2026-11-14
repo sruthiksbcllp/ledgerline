@@ -616,6 +616,11 @@ const VendorManagement = () => {
             <Switch />
           </Form.Item>
 
+          <Form.Item name="einvoice_applicable" label="Issues e-invoices (IRN)" valuePropName="checked" initialValue={false}
+            extra="Turn on for vendors whose turnover is above the e-invoicing limit (₹5 crore). Their bills must carry an IRN; a bill without one is flagged.">
+            <Switch />
+          </Form.Item>
+
           <Form.Item name="contact_person" label="Contact Person" extra={aiExtra('contact_person')}>
             <Input status={aiInputStatus('contact_person')} placeholder="Enter contact person name" />
           </Form.Item>

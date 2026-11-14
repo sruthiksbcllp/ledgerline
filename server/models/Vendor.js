@@ -38,6 +38,7 @@ module.exports = (sequelize) => {
     tds_section_code: { type: DataTypes.STRING(20) },
     tds_rate_percent: { type: DataTypes.DECIMAL(5, 2), defaultValue: 2 },
     rcm_applicable: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // reverse charge: we pay the GST on this vendor's bills
+    einvoice_applicable: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // vendor must e-invoice: its bills need an IRN
     gstin_status: { type: DataTypes.STRING(30), defaultValue: 'UNVERIFIED' },
     gstin_validated_at: { type: DataTypes.DATE },
     status: { type: DataTypes.ENUM('DRAFT', 'ACTIVE', 'BLACKLISTED'), defaultValue: 'DRAFT' },

@@ -101,6 +101,13 @@ async function reviewInvoice(req, body, excludeId = null) {
   if (!data.property_id && !po?.property_id) add('property_id', 'error', 'Select the property / site this bill belongs to');
   if (!data.po_id) add('po_id', 'warning', 'No purchase order linked: the bill will not be 3-way matched');
 
+  // GST checks from what is printed on the bill (sent with AI-read bills): GSTIN, addressed to us, IGST vs CGST/SGST, IRN.
+  const { cleanFacts, gstIssues } = require('../services/billGstChecks.service');
+  const facts = cleanFacts(body.bill_facts);
+  if (facts && vendor) {
+    checks.push(...await gstIssues({ clientId: vendor.client_id || getClientId(req), vendor, facts, propertyId: data.property_id || po?.property_id || null }));
+  }
+
   const { exact, similar } = await findDuplicates(tenantWhere, data, excludeId);
   if (exact) add('invoice_number', 'error', `Duplicate: invoice ${exact.invoice_number} from this vendor is already recorded (#${exact.id}, ${STATUS_LABEL[exact.status] || exact.status})`);
   if (similar) add('invoice_number', 'warning', `Possible duplicate: invoice ${similar.invoice_number} has the same vendor, date and total (#${similar.id})`);

@@ -250,6 +250,11 @@ async function cleanCheck(item, settings) {
     }
   }
 
+  // GST checks from what is printed on the bill
+  const { factsFromExtraction, gstIssues } = require('./billGstChecks.service');
+  const gst = await gstIssues({ clientId: item.client_id, vendor, facts: factsFromExtraction(x), propertyId: po?.property_id || null });
+  gst.forEach((g) => add(g.message));
+
   if (m.possible_duplicate) add(`Possible duplicate of invoice ${m.possible_duplicate.invoice_number} (#${m.possible_duplicate.id})`);
   if (total != null && total > settings.max_amount) add(`Above the auto-submit limit of ${inr(settings.max_amount)}`);
 
@@ -316,7 +321,8 @@ const bodyFromItem = (item, po) => {
     tax_amount: val('tax_amount'),
     total_amount: val('total_amount'),
     line_items: item.extraction.line_items || [],
-    source: 'AI_EXTRACTED'
+    source: 'AI_EXTRACTED',
+    bill_facts: require('./billGstChecks.service').factsFromExtraction(item.extraction)
   };
 };
 

@@ -180,6 +180,16 @@ const ApInvoiceAutomation = ({ intakeOnly = false, open = false, onClose, onSave
         tax_amount: extraction.header?.tax_amount?.value,
         total_amount: extraction.header?.total_amount?.value,
       } : undefined,
+      // GST details printed on the bill, for the GSTIN / addressed-to-us / IGST-vs-CGST / IRN checks.
+      bill_facts: extraction ? {
+        vendor_gstin: extraction.party?.gst_number?.value,
+        buyer_gstin: extraction.header?.buyer_gst_number?.value,
+        irn: extraction.header?.irn?.value,
+        tax_amount: extraction.header?.tax_amount?.value,
+        igst_amount: extraction.header?.igst_amount?.value,
+        cgst_amount: extraction.header?.cgst_amount?.value,
+        sgst_amount: extraction.header?.sgst_amount?.value,
+      } : undefined,
     };
   };
 
