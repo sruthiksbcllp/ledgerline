@@ -75,12 +75,35 @@ module.exports = (sequelize) => {
     exception_reason_code: { type: DataTypes.STRING(40), allowNull: true },
     exception_review_note: { type: DataTypes.STRING(500), allowNull: true },
     exception_reviewed_by: { type: DataTypes.INTEGER, allowNull: true },
-    exception_reviewed_at: { type: DataTypes.DATE, allowNull: true }
+    exception_reviewed_at: { type: DataTypes.DATE, allowNull: true },
+    exception_raised_at: { type: DataTypes.DATE, allowNull: true } // when the current / last exception was opened
   }, {
     sequelize,
     modelName: 'Invoice',
     tableName: 'invoices',
     freezeTableName: true
+  });
+
+  // Exception dates for the exception report, whichever code path opens or ends the exception:
+  // opened -> exception_raised_at; ended (accepted, cleared by a later receipt, or the bill
+  // rejected) -> exception_resolved_at, unless the caller set it. On instance.update() Sequelize
+  // saves only the fields passed in, so a field set here is added to options.fields.
+  Invoice.addHook('beforeSave', 'exceptionDates', (inv, options) => {
+    const stamp = (field) => {
+      inv.set(field, new Date());
+      if (Array.isArray(options?.fields) && !options.fields.includes(field)) options.fields.push(field);
+    };
+    const now = inv.get('exception_status');
+    if (inv.isNewRecord) {
+      if (now === 'OPEN') stamp('exception_raised_at');
+      return;
+    }
+    const before = inv.previous('exception_status');
+    const opened = now === 'OPEN' && inv.changed('exception_status') && before !== 'OPEN';
+    const closed = before === 'OPEN' && now !== 'OPEN' && inv.changed('exception_status');
+    const rejectedWhileOpen = now === 'OPEN' && inv.changed('status') && inv.get('status') === 'REJECTED';
+    if (opened) stamp('exception_raised_at');
+    else if ((closed || rejectedWhileOpen) && !inv.changed('exception_resolved_at')) stamp('exception_resolved_at');
   });
 
   return Invoice;

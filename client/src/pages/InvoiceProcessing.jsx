@@ -11,6 +11,7 @@ import { invoiceJournalHint } from '../utils/apLedger';
 import { PaymentAdviceButton } from '../components/finance/PaymentAdvice';
 import ApInvoiceAutomation from './ApInvoiceAutomation';
 import BillInbox from '../components/finance/BillInbox';
+import { useNavigate } from 'react-router-dom';
 
 const TAB_KEY = 'invoices.tab';
 const savedTab = () => { try { return localStorage.getItem(TAB_KEY) === 'inbox' ? 'inbox' : 'invoices'; } catch { return 'invoices'; } };
@@ -57,6 +58,7 @@ const InvoiceProcessing = () => {
   const [open, setOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState(null);
   const [viewingInvoice, setViewingInvoice] = useState(null);
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [paymentExternal, setPaymentExternal] = useState(false); // CR-HYB-01: payment owned externally (Oracle)
   const [payRow, setPayRow] = useState(null);
@@ -91,8 +93,16 @@ const InvoiceProcessing = () => {
         api.get('/procurement/invoices'),
         api.get('/procurement/po')
       ]);
-      setData(normalizeResponse(invRes?.data));
+      const list = normalizeResponse(invRes?.data);
+      setData(list);
       setPos(normalizeResponse(poRes?.data));
+      // ?open=<id> (links from the AP reports): open that bill's details once
+      const openId = Number(new URLSearchParams(window.location.search).get('open'));
+      if (openId) {
+        const hit = list.find((d) => d.id === openId);
+        if (hit) { setTab('invoices'); setViewingInvoice(hit); } else message.info('That bill is not in your list');
+        navigate(window.location.pathname, { replace: true });
+      }
       try {
         const f = await api.get('/system/features');
         const list = normalizeResponse(f?.data) || [];

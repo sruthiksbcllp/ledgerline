@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Col, Empty, Row, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, Col, Empty, Row, Space, Statistic, Table, Tabs, Tag, Typography, message } from 'antd';
 import { RefreshCcw, Scale } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import api from '../utils/api';
@@ -8,10 +8,15 @@ import {
   AGEING_BUCKETS, ageingBucket, daysPastDue, dueDate, inr, isOpenInvoice,
   journalFor, loadApInvoices, num, readApStore, vendorName, writeApStore,
 } from '../utils/apLedger';
+import ApCycleTimeReport from '../components/finance/ApCycleTimeReport';
+import ApExceptionReport from '../components/finance/ApExceptionReport';
 
 const { Text } = Typography;
 const contentCard = { borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' };
 const navyHead = () => ({ style: { background: '#1E3A5F', color: '#fff', fontWeight: 700 } });
+
+const TAB_KEY = 'apManagement.tab';
+const savedTab = () => { try { const t = localStorage.getItem(TAB_KEY); return ['balances', 'cycle', 'exceptions'].includes(t) ? t : 'balances'; } catch { return 'balances'; } };
 
 const fmtDate = (d) => (d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 
@@ -20,6 +25,8 @@ const ApManagement = () => {
   const [loading, setLoading] = useState(false);
   const [store, setStore] = useState(() => readApStore());
   const [selectedKeys, setSelectedKeys] = useState([]);
+  const [tab, setTab] = useState(savedTab);
+  const changeTab = (key) => { setTab(key); try { localStorage.setItem(TAB_KEY, key); } catch { /* ignore */ } };
 
   const load = async () => {
     setLoading(true);
@@ -145,20 +152,8 @@ const ApManagement = () => {
     lastActionColumn('INVOICE', lastActions, { numberOf: (r) => r.invoice_number }),
   ];
 
-  return (
+  const balances = (
     <div>
-      <PageHeader
-        icon={Scale}
-        title="Accounts Payable Management"
-        subtitle="The AP team manages outstanding vendor balances."
-        actions={(
-          <Space>
-            <Button icon={<RefreshCcw size={16} />} loading={loading} onClick={load}>Refresh</Button>
-            <Button type="primary" onClick={createProposal}>Create Payment Proposal</Button>
-          </Space>
-        )}
-      />
-
       <Card style={{ ...contentCard, marginBottom: 16 }}>
         <Text strong style={{ color: '#1E3A5F' }}>AP Functions</Text>
         <ul style={{ margin: '8px 0 0', paddingLeft: 18, color: '#334155' }}>
@@ -261,6 +256,32 @@ const ApManagement = () => {
           ]}
         />
       </Card>
+    </div>
+  );
+
+  return (
+    <div>
+      <PageHeader
+        icon={Scale}
+        title="Accounts Payable Management"
+        subtitle="The AP team manages outstanding vendor balances, and sees how fast bills move and where they get stuck."
+        actions={tab === 'balances' && (
+          <Space>
+            <Button icon={<RefreshCcw size={16} />} loading={loading} onClick={load}>Refresh</Button>
+            <Button type="primary" onClick={createProposal}>Create Payment Proposal</Button>
+          </Space>
+        )}
+      />
+
+      <Tabs
+        activeKey={tab}
+        onChange={changeTab}
+        items={[
+          { key: 'balances', label: 'Balances & ageing', children: balances },
+          { key: 'cycle', label: 'Cycle time', children: <ApCycleTimeReport /> },
+          { key: 'exceptions', label: 'Exceptions', children: <ApExceptionReport /> },
+        ]}
+      />
     </div>
   );
 };

@@ -1756,6 +1756,7 @@ exports.markInvoicePaid = async (req, res, next) => {
     const discountTotal = Math.round((Number(invoice.discount_received || 0) + discount) * 100) / 100;
     await invoice.update({
       status: 'PAID',
+      payment_date: invoice.payment_date || new Date(), // paid date for the MSME and cycle-time reports
       discount_received: discountTotal,
       paid_amount: Math.max(Number(invoice.paid_amount || 0), Math.round((netPayableOf(invoice) - discountTotal) * 100) / 100)
     });
