@@ -61,11 +61,12 @@ const startScheduler = () => {
     } catch { /* non-fatal */ }
   });
 
-  // AR overdue payment reminders (daily at 9am); each invoice at most once every 7 days
-  const { remindOverdue } = require('../services/arReminder.service');
+  // AR collections (daily at 9am): mark promises to pay kept or broken, then send each open invoice
+  // the reminder for its step on the ladder (due soon, first, second, final, escalated)
+  const { runLadder } = require('../services/arReminder.service');
   cron.schedule('0 9 * * *', async () => {
     try {
-      await executeWithRetry('AR overdue reminders', () => remindOverdue({ minDaysBetween: 7 }));
+      await executeWithRetry('AR reminder ladder', () => runLadder());
     } catch { /* non-fatal */ }
   });
 

@@ -148,6 +148,8 @@ const MainLayout = ({ children }) => {
   // AP journal follows the API's readers (routes/apJournal.routes.js).
   const canSeeApJournal = canSeeFinance || ['ACCOUNTS_PAYABLE','FINANCE','DIRECTOR_CFO','MANAGEMENT'].includes(normalizedRole);
   const canSeeArInvoices = canSeeFinance || ['ACCOUNTS_RECEIVABLE','FINANCE','MANAGEMENT'].includes(normalizedRole);
+  // Order to cash: the Director / CFO verifies customers and releases credit holds, so sees these pages too.
+  const canSeeArFlow = canSeeArInvoices || normalizedRole === 'DIRECTOR_CFO';
   const canSeeMaintenance = ['PROVIDER_ADMIN','DEV_ADMIN','SUPER_ADMIN','CLIENT_ADMIN','ADMIN','MAINTENANCE'].includes(normalizedRole);
   const canSeeAudit = ['PROVIDER_ADMIN','DEV_ADMIN','SUPER_ADMIN','CLIENT_ADMIN','ADMIN','AUDITOR'].includes(normalizedRole);
   const canSeeInventory = ['PROVIDER_ADMIN','DEV_ADMIN','SUPER_ADMIN','CLIENT_ADMIN','ADMIN'].includes(normalizedRole);
@@ -383,9 +385,13 @@ const MainLayout = ({ children }) => {
       key: 'accounts-receivable',
       icon: <Landmark size={18} color="#A5B4FC" />,
       label: 'Accounts Receivable',
-      hidden: (!canSeeProcurement && !canSeeArInvoices) || (features && features.PROCUREMENT_MODULE === false),
+      hidden: (!canSeeProcurement && !canSeeArFlow) || (features && features.PROCUREMENT_MODULE === false),
       children: [
+        { key: '/finance/ar/customers', icon: <Users2 size={16} />, label: 'Customers', hidden: !canSeeArFlow },
+        { key: '/finance/ar/sales-orders', icon: <ClipboardList size={16} />, label: 'Sales Orders', hidden: !canSeeArFlow },
         { key: '/finance/ar/customer-invoices', icon: <HandCoins size={16} />, label: 'Customer Invoices', hidden: !canSeeArInvoices },
+        { key: '/finance/ar/collections', icon: <WalletCards size={16} />, label: 'Collections', hidden: !canSeeArFlow },
+        { key: '/finance/ar/accounting-entry', icon: <ScrollText size={16} />, label: 'AR Accounting Entries', hidden: !canSeeArFlow },
         { key: '/finance/ar/record-to-report', icon: <ScrollText size={16} />, label: 'Record to Report', hidden: !canSeeFinance },
         { key: '/finance/ar/chart-of-accounts', icon: <ListChecks size={16} />, label: 'Chart of Accounts', hidden: !canSeeFinance },
         { key: '/finance/ar/journal-entry', icon: <BookOpen size={16} />, label: 'Journal Entry', hidden: !canSeeFinance },

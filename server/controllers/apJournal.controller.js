@@ -28,7 +28,7 @@ exports.list = async (req, res) => {
   if (!clientId) return res.status(400).json({ success: false, message: 'Select a company first' });
   await backfillOnce(clientId);
   const { event_type, vendor_id, from, to, q, account } = req.query;
-  const where = { client_id: clientId };
+  const where = { client_id: clientId, source_module: { [Op.notIn]: ['AR_INVOICE', 'AR_RECEIPT'] } };
   if (event_type) where.event_type = event_type;
   if (vendor_id) where.vendor_id = Number(vendor_id);
   if (from || to) where.entry_date = { ...(from ? { [Op.gte]: from } : {}), ...(to ? { [Op.lte]: to } : {}) };

@@ -16,6 +16,8 @@ module.exports = (sequelize, DataTypes) => {
     message: { type: DataTypes.TEXT, allowNull: false },
     delivery: { type: DataTypes.ENUM('EMAILED', 'NOT_SENT'), allowNull: false, defaultValue: 'NOT_SENT' },
     delivery_note: { type: DataTypes.STRING(255), allowNull: true },
+    stage: { type: DataTypes.STRING(20), allowNull: true }, // step on the reminder ladder (arReminder.service LADDER)
+    drafted_by_ai: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     created_by: { type: DataTypes.INTEGER, allowNull: true }
   }, {
     sequelize,

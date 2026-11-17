@@ -28,6 +28,11 @@ const DEFAULTS = {
   SES:       { prefix: 'SES', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
   RETURN:    { prefix: 'PRN', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 }, // purchase return to vendor
   GIR:       { prefix: 'GIR', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 }, // goods inspection report
+  // Accounts Receivable (order to cash): quotation, sales order, delivery note, customer invoice
+  SALES_QUOTE:    { prefix: 'SQ', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  SALES_ORDER:    { prefix: 'SO', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  SALES_DELIVERY: { prefix: 'DN', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  SALES_INVOICE:  { prefix: 'SI', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
 };
 
 /**

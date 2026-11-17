@@ -9,6 +9,7 @@ import api from '../utils/api';
 import { inr } from '../utils/apLedger';
 import { ChecksPanel, DocumentDropzone, StatusTag } from '../components/finance/DocumentReview';
 import { checkUploadFile, historyItems, markProps } from '../utils/documentReview';
+import { ArFlow, ArStatus, JournalLines, StageTag } from '../components/ar/ArShared';
 
 const { Text } = Typography;
 
@@ -264,10 +265,10 @@ const ArCustomerInvoices = () => {
     { title: 'Invoice date', dataIndex: 'invoice_date', render: fmt },
     { title: 'Due', dataIndex: 'due_date', render: (v, r) => <Space size={6}>{fmt(v)}{r.overdue && <Tag color="error">{r.days_overdue}d overdue</Tag>}</Space> },
     { title: 'Total', dataIndex: 'total_amount', align: 'right', render: (v) => inr(v) },
-    { title: 'Received', dataIndex: 'amount_received', align: 'right', render: (v) => inr(v) },
+    { title: 'Received', dataIndex: 'amount_received', align: 'right', render: (v, r) => <Space direction="vertical" size={0} style={{ alignItems: 'flex-end' }}><span>{inr(v)}</span>{Number(r.tds_deducted) > 0 && <Text type="secondary" style={{ fontSize: 12 }}>+ {inr(r.tds_deducted)} TDS</Text>}</Space> },
     { title: 'Outstanding', dataIndex: 'outstanding', align: 'right', render: (v) => <Text strong>{inr(v)}</Text> },
     { title: 'Status', dataIndex: 'status', render: (v) => <StatusTag status={v} kind="AR" /> },
-    { title: 'Last reminder', dataIndex: 'last_reminder_at', render: (v) => (v ? dayjs(v).format('DD MMM') : <Text type="secondary">—</Text>) },
+    { title: 'Reminder step', dataIndex: 'reminder_stage', render: (v, r) => <Space size={6}><StageTag stage={v} label={r.reminder_stage_label} />{r.last_reminder_at && <Text type="secondary" style={{ fontSize: 12 }}>sent {dayjs(r.last_reminder_at).format('DD MMM')}</Text>}</Space> },
     { title: '', key: 'open', render: (_, r) => <Button type="link" onClick={() => openDetail(r.id)}>Open</Button> },
   ];
 
@@ -275,6 +276,7 @@ const ArCustomerInvoices = () => {
 
   return (
     <div>
+      <ArFlow active={['invoice']} />
       <Card style={{ ...card, marginBottom: 16 }} styles={{ body: { padding: 20 } }}>
         <Row justify="space-between" align="middle" gutter={[16, 16]}>
           <Col>
@@ -282,7 +284,7 @@ const ArCustomerInvoices = () => {
               <div className="page-header-icon"><HandCoins size={24} /></div>
               <div>
                 <h2 className="page-header-title">Customer Invoices</h2>
-                <Text type="secondary">Post customer invoices, record partial and full payments, chase overdue balances</Text>
+                <Text type="secondary">Invoices raised from deliveries or recorded directly, with their payments, reminders and accounting entries</Text>
               </div>
             </Space>
           </Col>
@@ -413,7 +415,10 @@ const ArCustomerInvoices = () => {
               <Descriptions.Item label="Invoice date">{fmt(detail.invoice_date)}</Descriptions.Item>
               <Descriptions.Item label="Due date">{fmt(detail.due_date)}</Descriptions.Item>
               <Descriptions.Item label="Total">{inr(detail.total_amount)}</Descriptions.Item>
+              <Descriptions.Item label="GST">{Number(detail.igst_amount) > 0 ? `IGST ${inr(detail.igst_amount)}` : Number(detail.tax_amount) > 0 ? `CGST ${inr(detail.cgst_amount)} + SGST ${inr(detail.sgst_amount)}` : '—'}</Descriptions.Item>
+              <Descriptions.Item label="Sales order">{detail.salesOrder?.order_number || <Text type="secondary">Recorded directly</Text>}</Descriptions.Item>
               <Descriptions.Item label="Received">{inr(detail.amount_received)}</Descriptions.Item>
+              <Descriptions.Item label="TDS deducted">{inr(detail.tds_deducted)}</Descriptions.Item>
               <Descriptions.Item label="Outstanding"><Text strong>{inr(detail.outstanding)}</Text></Descriptions.Item>
               <Descriptions.Item label="Reminder email">{detail.customer?.email || <Text type="secondary">No email on file</Text>}</Descriptions.Item>
             </Descriptions>
@@ -423,14 +428,34 @@ const ArCustomerInvoices = () => {
                 { title: 'Mode', dataIndex: 'payment_mode', render: (v) => v || '—' },
                 { title: 'Reference', dataIndex: 'reference', render: (v) => v || '—' },
                 { title: 'Amount', dataIndex: 'amount', align: 'right', render: (v) => inr(v) },
+                { title: 'TDS', dataIndex: 'tds_amount', align: 'right', render: (v) => (Number(v) > 0 ? inr(v) : '—') },
+              ]} />
+            )}
+            {detail.promises?.length > 0 && (
+              <Table size="small" rowKey="id" pagination={false} title={() => <Text strong>Promises to pay</Text>} dataSource={detail.promises} columns={[
+                { title: 'Promised for', dataIndex: 'promised_date', render: fmt },
+                { title: 'Amount', dataIndex: 'amount', align: 'right', render: (v) => inr(v) },
+                { title: 'Note', dataIndex: 'note', render: (v) => v || '—' },
+                { title: 'Status', dataIndex: 'status', render: (v) => <ArStatus status={v} /> },
               ]} />
             )}
             {detail.reminders?.length > 0 && (
               <Table size="small" rowKey="id" pagination={false} title={() => <Text strong>Reminders</Text>} dataSource={detail.reminders} columns={[
                 { title: 'Sent', dataIndex: 'created_at', render: (v, r) => dayjs(v || r.createdAt).format('DD MMM YYYY, h:mm A') },
+                { title: 'Step', dataIndex: 'stage', render: (v, r) => <Space size={4}>{({ UPCOMING: 'Due soon', FIRST: 'First', SECOND: 'Second', FINAL: 'Final notice', ESCALATED: 'Escalated' }[v]) || '—'}{r.drafted_by_ai && <Tag color="geekblue">AI</Tag>}</Space> },
                 { title: 'To', dataIndex: 'to_email', render: (v) => v || '—' },
                 { title: 'Delivery', dataIndex: 'delivery', render: (v, r) => (v === 'EMAILED' ? <Tag color="success">Emailed</Tag> : <Tag title={r.delivery_note}>Recorded only</Tag>) },
               ]} />
+            )}
+            {detail.journals?.length > 0 && (
+              <div>
+                <Text strong>Accounting entries</Text>
+                {detail.journals.map((j) => (
+                  <Card key={j.id} size="small" style={{ marginTop: 8, borderRadius: 12 }} title={<Space size={8}><span>{j.je_number}</span><Text type="secondary" style={{ fontWeight: 400 }}>{fmt(j.entry_date)} · {j.narration}</Text></Space>}>
+                    <JournalLines lines={j.lines} />
+                  </Card>
+                ))}
+              </div>
             )}
             <div>
               <Text strong>History</Text>
@@ -442,9 +467,18 @@ const ArCustomerInvoices = () => {
 
       <Modal open={receiptOpen} title="Record payment received" onCancel={() => setReceiptOpen(false)} onOk={recordReceipt} confirmLoading={acting} okText="Record payment" destroyOnClose>
         <Form form={receiptForm} layout="vertical">
-          <Form.Item name="amount" label={`Amount (outstanding ${detail ? inr(detail.outstanding) : ''})`} rules={[{ required: true, message: 'Enter the amount' }]} extra="Less than the outstanding amount records a partial payment.">
-            <InputNumber style={{ width: '100%' }} min={0.01} max={detail ? Number(detail.outstanding) : undefined} prefix="₹" />
-          </Form.Item>
+          <Row gutter={12}>
+            <Col span={14}>
+              <Form.Item name="amount" label={`Amount received (outstanding ${detail ? inr(detail.outstanding) : ''})`} rules={[{ required: true, message: 'Enter the amount' }]} extra="Less than the outstanding amount records a partial payment.">
+                <InputNumber style={{ width: '100%' }} min={0} max={detail ? Number(detail.outstanding) : undefined} prefix="₹" />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item name="tds_amount" label="TDS deducted" extra="Withheld by the customer; not banked.">
+                <InputNumber style={{ width: '100%' }} min={0} max={detail ? Number(detail.outstanding) : undefined} prefix="₹" />
+              </Form.Item>
+            </Col>
+          </Row>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="received_date" label="Received on"><DatePicker style={{ width: '100%' }} format="DD MMM YYYY" /></Form.Item></Col>
             <Col span={12}><Form.Item name="payment_mode" label="Mode"><Select allowClear options={MODES} /></Form.Item></Col>
