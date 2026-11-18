@@ -17,17 +17,25 @@ export const LEDGERLINE_ROLES = [
 
 const PRIVILEGED = ['SUPER_ADMIN', 'PROVIDER_ADMIN', 'CLIENT_ADMIN', 'DEV_ADMIN', 'ADMIN'];
 
+// AR pages follow the AR permission steps in server/config/rbac.js: Manager verifies customers and
+// releases credit holds (Customers, Sales Orders), Warehouse dispatches and records proof of delivery
+// (Sales Orders), Compliance reviews customers (Customers), and a Requester raises and follows their
+// own quotations (Sales Orders), as with requisitions. Procurement (Customers) and Accounts Payable
+// (Customer Invoices) can look but not change, for vendors that are also customers.
+// Approvers (server AR_APPROVE): Manager decides credit notes up to ₹1,00,000 (Disputes & Credit
+// Notes); the Director / CFO approves credit notes, write-offs and the credit-loss provision, signs off
+// the AR close and reviews the ledger pages (R2R). Management reads all of them.
 const NAV = {
-  REQUESTER: ['/dashboard', '/procurement/requisition', '/procurement/ses', '/requests/my', '/requests/new', '/my-profile', '/security-settings'],
-  PROCUREMENT: ['/dashboard', '/procurement/requisition', '/procurement/rfq', '/procurement/quotations', '/procurement/purchase-orders', '/procurement/purchase-returns', '/bill-approvals', '/procurement/ses', '/procurement/vendor-risk', '/procurement/reports', '/vendor-master', '/my-profile', '/security-settings'],
-  MANAGER: ['/dashboard', '/procurement/requisition', '/procurement/ses', '/bill-approvals', '/requests', '/my-profile', '/security-settings'],
-  DIRECTOR_CFO: ['/dashboard', '/procurement/requisition', '/procurement/purchase-orders', '/procurement/ses', '/bill-approvals', '/procurement/reports', '/finance/payment-processing', '/finance/msme-payments', '/finance/ap-management', '/finance/ap-accounting-entry', '/finance/ar/customers', '/finance/ar/sales-orders', '/finance/ar/collections', '/finance/ar/accounting-entry', '/finance/ar/financial-statements', '/finance/ar/trial-balance', '/my-profile', '/security-settings'],
-  COMPLIANCE: ['/dashboard', '/vendor-master', '/procurement/vendor-approvals', '/procurement/ses', '/procurement/vendor-risk', '/my-profile', '/security-settings'],
-  WAREHOUSE: ['/dashboard', '/procurement/requisition/in-house-stock', '/procurement/purchase-orders', '/procurement/grn', '/bill-approvals', '/procurement/purchase-returns', '/procurement/gate-entry', '/my-profile', '/security-settings'],
+  REQUESTER: ['/dashboard', '/procurement/requisition', '/procurement/ses', '/requests/my', '/requests/new', '/finance/ar/sales-orders', '/my-profile', '/security-settings'],
+  PROCUREMENT: ['/dashboard', '/procurement/requisition', '/procurement/rfq', '/procurement/quotations', '/procurement/purchase-orders', '/procurement/purchase-returns', '/bill-approvals', '/procurement/ses', '/procurement/vendor-risk', '/procurement/reports', '/vendor-master', '/finance/ar/customers', '/my-profile', '/security-settings'],
+  MANAGER: ['/dashboard', '/procurement/requisition', '/procurement/ses', '/bill-approvals', '/requests', '/finance/ar/customers', '/finance/ar/sales-orders', '/finance/ar/credit-notes', '/my-profile', '/security-settings'],
+  DIRECTOR_CFO: ['/dashboard', '/procurement/requisition', '/procurement/purchase-orders', '/procurement/ses', '/bill-approvals', '/procurement/reports', '/finance/payment-processing', '/finance/msme-payments', '/finance/ap-management', '/finance/ap-accounting-entry', '/finance/ar/customers', '/finance/ar/sales-orders', '/finance/ar/customer-invoices', '/finance/ar/credit-notes', '/finance/ar/collections', '/finance/ar/credit-loss', '/finance/ar/ar-close', '/finance/ar/accounting-entry', '/finance/ar/record-to-report', '/finance/ar/chart-of-accounts', '/finance/ar/journal-entry', '/finance/ar/general-ledger', '/finance/ar/reconciliations', '/finance/ar/financial-statements', '/finance/ar/trial-balance', '/finance/ar/period-close', '/my-profile', '/security-settings'],
+  COMPLIANCE: ['/dashboard', '/vendor-master', '/procurement/vendor-approvals', '/procurement/ses', '/procurement/vendor-risk', '/finance/ar/customers', '/my-profile', '/security-settings'],
+  WAREHOUSE: ['/dashboard', '/procurement/requisition/in-house-stock', '/procurement/purchase-orders', '/procurement/grn', '/bill-approvals', '/procurement/purchase-returns', '/procurement/gate-entry', '/finance/ar/sales-orders', '/my-profile', '/security-settings'],
   FINANCE: ['/dashboard', '/finance', '/procurement/reports', '/procurement/invoices', '/bill-approvals', '/procurement/purchase-returns', '/procurement/ses', '/my-profile', '/security-settings'],
-  ACCOUNTS_PAYABLE: ['/dashboard', '/procurement/invoices', '/bill-approvals', '/procurement/purchase-orders', '/procurement/grn', '/procurement/purchase-returns', '/procurement/ses', '/finance/three-way-match', '/finance/ap-accounting-entry', '/finance/ap-management', '/finance/payment-processing', '/finance/msme-payments', '/vendor-master', '/my-profile', '/security-settings'],
+  ACCOUNTS_PAYABLE: ['/dashboard', '/procurement/invoices', '/bill-approvals', '/procurement/purchase-orders', '/procurement/grn', '/procurement/purchase-returns', '/procurement/ses', '/finance/three-way-match', '/finance/ap-accounting-entry', '/finance/ap-management', '/finance/payment-processing', '/finance/msme-payments', '/vendor-master', '/finance/ar/customer-invoices', '/my-profile', '/security-settings'],
   ACCOUNTS_RECEIVABLE: ['/dashboard', '/finance/ar', '/my-profile', '/security-settings'],
-  MANAGEMENT: ['/dashboard', '/procurement/reports', '/procurement/ses', '/finance/ap-management', '/finance/msme-payments', '/finance/ap-accounting-entry', '/finance/ar/customer-invoices', '/finance/ar/customers', '/finance/ar/sales-orders', '/finance/ar/collections', '/finance/ar/accounting-entry', '/finance/ar/financial-statements', '/finance/ar/trial-balance', '/finance/ar/general-ledger', '/my-profile', '/security-settings'],
+  MANAGEMENT: ['/dashboard', '/procurement/reports', '/procurement/ses', '/finance/ap-management', '/finance/msme-payments', '/finance/ap-accounting-entry', '/finance/ar/customer-invoices', '/finance/ar/customers', '/finance/ar/sales-orders', '/finance/ar/credit-notes', '/finance/ar/collections', '/finance/ar/credit-loss', '/finance/ar/ar-close', '/finance/ar/accounting-entry', '/finance/ar/record-to-report', '/finance/ar/chart-of-accounts', '/finance/ar/journal-entry', '/finance/ar/reconciliations', '/finance/ar/financial-statements', '/finance/ar/trial-balance', '/finance/ar/general-ledger', '/finance/ar/period-close', '/my-profile', '/security-settings'],
   VENDOR: ['/dashboard', '/procurement/purchase-orders', '/procurement/invoices', '/my-profile', '/security-settings']
 };
 

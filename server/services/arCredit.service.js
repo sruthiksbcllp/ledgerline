@@ -7,7 +7,9 @@
  * Credit check (blueprint O2C step 2): an order goes on hold when
  *   - the customer is on hold, or
  *   - open receivables + other confirmed orders not yet invoiced + this order exceed the credit limit, or
- *   - the customer has an invoice more than OVERDUE_BLOCK_DAYS days overdue.
+ *   - the customer has an invoice more than OVERDUE_BLOCK_DAYS days overdue, or
+ *   - a line carries a discount above DISCOUNT_APPROVAL_PERCENT (prices from the agreed rate; bigger
+ *     discounts need approval).
  * A held order is released by someone whose approval limit covers the order value (the same
  * limits as PRs, POs and bills) and who did not raise the order.
  */
@@ -17,6 +19,7 @@ const { companyGstins } = require('./billGstChecks.service');
 const { limitOf, neededLabel } = require('./billApproval.service');
 
 const OVERDUE_BLOCK_DAYS = 60;
+const DISCOUNT_APPROVAL_PERCENT = 10;
 const OPEN_INVOICE = ['UNPAID', 'PARTIALLY_PAID'];
 const OPEN_ORDER = ['CONFIRMED', 'PARTIALLY_DELIVERED', 'DELIVERED'];
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -24,13 +27,32 @@ const today = () => new Date().toISOString().slice(0, 10);
 const daysBetween = (from, to) => Math.floor((new Date(to) - new Date(from)) / 86400000);
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
-/** What is still owed on an invoice: total less cash received and TDS the customer withheld. */
-const outstandingOf = (inv) => Math.max(0, round2(Number(inv.total_amount || 0) - Number(inv.amount_received || 0) - Number(inv.tds_deducted || 0)));
+/**
+ * What is still owed on an invoice: total less cash received, TDS the customer withheld, approved
+ * credit notes, early-payment discount allowed and amounts written off. The one place this is worked
+ * out, so the customer ledger, ageing, reminders and the ledger tie-out always agree.
+ */
+const outstandingOf = (inv) => Math.max(0, round2(
+  Number(inv.total_amount || 0) - Number(inv.amount_received || 0) - Number(inv.tds_deducted || 0)
+  - Number(inv.credited_amount || 0) - Number(inv.discount_allowed || 0) - Number(inv.written_off_amount || 0)
+));
 
-/** Value of an order line that is not invoiced yet, with GST. */
+/** Status an invoice should have after a settlement: PAID once nothing is left, else PARTIALLY_PAID / UNPAID. */
+const settledStatus = (inv) => {
+  // Nothing left: written off if a write-off closed it (tracked for recovery), otherwise paid.
+  if (outstandingOf(inv) <= 0.005) return Number(inv.written_off_amount || 0) > 0.005 ? 'WRITTEN_OFF' : 'PAID';
+  const settled = Number(inv.amount_received || 0) + Number(inv.tds_deducted || 0) + Number(inv.credited_amount || 0)
+    + Number(inv.discount_allowed || 0) + Number(inv.written_off_amount || 0);
+  return settled > 0.005 ? 'PARTIALLY_PAID' : 'UNPAID';
+};
+
+/** Rate after the line discount. */
+const netRate = (item) => round2(Number(item.rate) * (1 - Number(item.discount_percent || 0) / 100));
+
+/** Value of an order line that is not invoiced yet, after discount, with GST. */
 const uninvoicedValue = (item) => {
   const open = Math.max(0, Number(item.quantity) - Number(item.invoiced_qty || 0));
-  return round2(open * Number(item.rate) * (1 + Number(item.gst_percent || 0) / 100));
+  return round2(open * netRate(item) * (1 + Number(item.gst_percent || 0) / 100));
 };
 
 async function exposure(clientId, customerId, { excludeOrderId = null, transaction } = {}) {
@@ -69,6 +91,12 @@ async function check(customer, order, { transaction } = {}) {
   }
   if (exp.oldest_overdue_days > OVERDUE_BLOCK_DAYS) {
     reasons.push(`An invoice is ${exp.oldest_overdue_days} days overdue (more than ${OVERDUE_BLOCK_DAYS}); ${inr(exp.overdue)} is past due`);
+  }
+  // Discounts above the agreed level need approval (blueprint O2C step 2).
+  const items = order.items || await ArSalesOrderItem.findAll({ where: { order_id: order.id }, transaction });
+  const bigDiscounts = items.filter((it) => Number(it.discount_percent || 0) > DISCOUNT_APPROVAL_PERCENT);
+  if (bigDiscounts.length) {
+    reasons.push(`Discount above ${DISCOUNT_APPROVAL_PERCENT}% needs approval: ${bigDiscounts.map((it) => `${it.description} ${Number(it.discount_percent)}%`).join(', ')}`);
   }
   return {
     passed: reasons.length === 0, reasons, checked_at: new Date().toISOString(), credit_limit: limit,
@@ -137,4 +165,7 @@ async function suggestLimit(clientId, customer) {
   };
 }
 
-module.exports = { OVERDUE_BLOCK_DAYS, OPEN_INVOICE, OPEN_ORDER, outstandingOf, uninvoicedValue, exposure, check, releaseBlock, gstSplit, suggestLimit };
+module.exports = {
+  OVERDUE_BLOCK_DAYS, DISCOUNT_APPROVAL_PERCENT, OPEN_INVOICE, OPEN_ORDER, outstandingOf, settledStatus, netRate, uninvoicedValue,
+  exposure, check, releaseBlock, gstSplit, suggestLimit
+};

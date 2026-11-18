@@ -1,98 +1,134 @@
-import React, { useState } from 'react';
-import { Button, Card, Space, Table, Tag, message } from 'antd';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, Button, Card, DatePicker, Input, Modal, Space, Table, Tag, Typography, message } from 'antd';
 import { CalendarClock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import PageHeader from '../../components/PageHeader';
-import FlowStrip from './FlowStrip';
-import { CLOSE_STEPS, NAVY_HEAD, plain, readArStore, writeArStore } from '../../utils/arLedger';
+import api from '../../utils/api';
+import { PageHeader } from '../../components/ar/ArShared';
+import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
-const TEMPLATES = [
-  { key: 'accrual', title: 'Accruals', note: 'Expense incurred but invoice not received.', lines: [{ account: 'Audit Fees Expense', code: '500000', debit: 100000, credit: 0 }, { account: 'Accrued Liability', code: '230000', name: 'Accrued Liability', type: 'Liability', debit: 0, credit: 100000 }] },
-  { key: 'prepay', title: 'Prepayments — initial entry', note: 'Expense paid in advance.', lines: [{ account: 'Prepaid Expense', code: '140000', name: 'Prepaid Expense', type: 'Asset', debit: 120000, credit: 0 }, { account: 'Bank', code: '110000', debit: 0, credit: 120000 }] },
-  { key: 'recognise', title: 'Monthly recognition', note: 'Release one month of the prepayment.', lines: [{ account: 'Rent Expense', code: '500000', debit: 10000, credit: 0 }, { account: 'Prepaid Expense', code: '140000', name: 'Prepaid Expense', type: 'Asset', debit: 0, credit: 10000 }] },
-  { key: 'depreciation', title: 'Depreciation', note: 'Charge depreciation for the period.', lines: [{ account: 'Depreciation Expense', debit: 'Dr', credit: '' }, { account: 'Accumulated Depreciation', debit: '', credit: 'Cr' }] },
-  { key: 'provision', title: 'Provisions', note: 'Recognise a provision.', lines: [{ account: 'Provision Expense', debit: 'Dr', credit: '' }, { account: 'Provision Liability', debit: '', credit: 'Cr' }] },
-];
+const { Text } = Typography;
+const LINKS = { close_ar: '/finance/ar/ar-close', bank_rec: '/finance/ar/reconciliations', tb_freeze: '/finance/ar/trial-balance', financial_statements: '/finance/ar/financial-statements' };
 
 const PeriodClose = () => {
-  const [store, setStore] = useState(() => readArStore());
+  const navigate = useNavigate();
+  const [month, setMonth] = useState(dayjs());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [ticking, setTicking] = useState(null); // step being marked done
+  const [note, setNote] = useState('');
+  const period = month.format('YYYY-MM');
 
-  const toggle = (step) => {
-    const close = { ...store.close, [step]: !store.close[step] };
-    const frozen = step === 'Trial Balance Freeze' ? !store.close[step] : store.frozen;
-    setStore(writeArStore({ ...store, close, frozen }));
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/r2r/close', { params: { period } });
+      setData(r?.data?.data || null);
+    } catch (e) {
+      message.error(errorOf(e, 'Could not load the period close'));
+    } finally {
+      setLoading(false);
+    }
+  }, [period]);
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = async (step, done, stepNote) => {
+    setBusy(true);
+    try {
+      const r = await api.post(`/r2r/close/${period}/tasks/${step.key}`, { done, note: stepNote || null });
+      message.success(r?.data?.message || 'Saved');
+      setData(r?.data?.data || data);
+      setTicking(null);
+      setNote('');
+    } catch (e) {
+      message.error(errorOf(e, 'Could not update the step'));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const postTemplate = (template) => {
-    if (store.frozen) {
-      message.error('Trial balance is frozen');
-      return;
-    }
-    const numeric = template.lines.every((line) => typeof line.debit === 'number' && typeof line.credit === 'number' && line.code);
-    if (!numeric) {
-      message.info(`${template.title} is a memo template. Enter the amounts in Journal Entry.`);
-      return;
-    }
-    let accounts = store.accounts;
-    template.lines.forEach((line) => {
-      if (line.name && !accounts.some((account) => account.code === line.code)) {
-        accounts = [...accounts, { code: line.code, name: line.name, type: line.type, openingDr: 0, openingCr: 0 }];
-      }
-    });
-    const journal = {
-      id: `JE-${Date.now()}`,
-      number: `CLOSE-${template.key.toUpperCase()}`,
-      date: dayjs().format('YYYY-MM-DD'),
-      entity: 'LedgerLine',
-      company: 'LedgerLine',
-      costCenter: '',
-      reference: template.title,
-      source: 'Period Close',
-      status: 'POSTED',
-      lines: template.lines.map((line) => ({ account: line.code, debit: line.debit, credit: line.credit })),
-    };
-    setStore(writeArStore({ ...store, accounts, journals: [journal, ...store.journals] }));
-    message.success(`${template.title} posted`);
-  };
+  const items = data?.items || [];
+  const doneCount = items.filter((i) => i.done).length;
+
+  const columns = [
+    { title: 'Step', dataIndex: 'n', width: 60 },
+    {
+      title: 'What', dataIndex: 'label',
+      render: (v, r) => (
+        <div>
+          <Text strong>{v}</Text>
+          {r.auto && <Tag style={{ marginLeft: 8 }}>Automatic</Tag>}
+          <div><Text type="secondary" style={{ fontSize: 12 }}>Who: {r.who}</Text></div>
+          {r.detail && <div style={{ fontSize: 13 }}>{r.detail}</div>}
+        </div>
+      ),
+    },
+    { title: 'Status', dataIndex: 'done', width: 120, render: (v) => (v ? <Tag color="success">Done</Tag> : <Tag>Open</Tag>) },
+    {
+      title: 'Done by', key: 'by', width: 200,
+      render: (_, r) => (r.done && r.done_by_name ? <div style={{ fontSize: 12 }}>{r.done_by_name}<div><Text type="secondary">{fmt(r.done_at)}</Text></div></div> : <Text type="secondary">—</Text>),
+    },
+    {
+      title: '', key: 'act', width: 260,
+      render: (_, r) => (
+        <Space direction="vertical" size={4}>
+          <Space wrap>
+            {r.can_toggle && !r.done && <Button size="small" type="primary" onClick={() => { setTicking(r); setNote(''); }}>Mark done</Button>}
+            {r.can_toggle && r.done && <Button size="small" loading={busy} onClick={() => toggle(r, false)}>Undo</Button>}
+            {LINKS[r.key] && <Button size="small" type="link" onClick={() => navigate(LINKS[r.key])}>Open page</Button>}
+          </Space>
+          {!r.can_toggle && r.block && <Text type="secondary" style={{ fontSize: 12 }}>{r.block}</Text>}
+        </Space>
+      ),
+    },
+  ];
 
   return (
     <div>
-      <PageHeader icon={CalendarClock} title="Period Close" subtitle="Close AP and AR, post adjustments, freeze the trial balance, and issue the statements." />
-      <Card title="Period Close Workflow" style={{ borderRadius: 16, marginBottom: 16 }}>
-        <FlowStrip steps={CLOSE_STEPS} rowSize={3} />
-        <Space wrap style={{ marginTop: 16 }}>
-          {CLOSE_STEPS.map((step) => (
-            <Button key={step} type={store.close[step] ? 'primary' : 'default'} onClick={() => toggle(step)}>
-              {store.close[step] ? 'Done' : 'Mark'} · {step}
-            </Button>
-          ))}
-        </Space>
-        {store.frozen ? <Tag color="error" style={{ marginTop: 12 }}>Trial balance frozen</Tag> : null}
-      </Card>
-      <Card title="Month-End Close Activities" style={{ borderRadius: 16 }}>
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          {TEMPLATES.map((template) => (
-            <div key={template.key}>
-              <Space style={{ marginBottom: 8 }}>
-                <strong>{template.title}</strong>
-                <Button size="small" onClick={() => postTemplate(template)}>Post</Button>
-              </Space>
-              <div style={{ marginBottom: 8, color: '#64748B' }}>{template.note}</div>
-              <Table
-                size="small"
-                pagination={false}
-                rowKey="account"
-                dataSource={template.lines}
-                columns={[
-                  { title: 'Account', dataIndex: 'account', onHeaderCell: NAVY_HEAD },
-                  { title: 'Debit', dataIndex: 'debit', align: 'right', onHeaderCell: NAVY_HEAD, render: (value) => (typeof value === 'number' && value ? plain(value) : value || '') },
-                  { title: 'Credit', dataIndex: 'credit', align: 'right', onHeaderCell: NAVY_HEAD, render: (value) => (typeof value === 'number' && value ? plain(value) : value || '') },
-                ]}
-              />
+      <PageHeader
+        icon={<CalendarClock size={22} />}
+        title="Period Close"
+        subtitle="The month-end close, step by step: close AP and AR, reconcile, adjust, review, freeze the trial balance, produce the statements, close."
+        actions={[<DatePicker key="m" picker="month" value={month} onChange={(v) => setMonth(v || dayjs())} allowClear={false} format="MMMM YYYY" />]}
+      />
+
+      {data && (
+        <Alert
+          style={{ marginBottom: 16 }}
+          type={data.closed ? 'success' : 'info'}
+          showIcon
+          message={data.closed ? `${data.label} is closed` : `${data.label}: ${doneCount} of ${items.length} steps done`}
+          description={(
+            <div>
+              <div>
+                Trial balance at month end: {data.trial_balance.balanced ? 'balanced' : 'not balanced'} (debit {inr(data.trial_balance.total_dr)} · credit {inr(data.trial_balance.total_cr)}).
+              </div>
+              <div>
+                Ticking “Period closed” locks manual journals dated in the month. Accounts Receivable postings are locked separately by the AR close (step 2).
+              </div>
             </div>
-          ))}
-        </Space>
+          )}
+        />
+      )}
+
+      <Card style={card} styles={{ body: { padding: 0 } }}>
+        <Table rowKey="key" loading={loading} dataSource={items} columns={columns} pagination={false} scroll={{ x: 900 }} />
       </Card>
+
+      <Modal
+        open={!!ticking}
+        title={ticking ? `Mark “${ticking.label}” done for ${data?.label || period}` : ''}
+        onCancel={() => setTicking(null)}
+        onOk={() => toggle(ticking, true, note)}
+        okText="Mark done"
+        confirmLoading={busy}
+      >
+        {ticking?.key === 'period_closed' && (
+          <Alert style={{ marginBottom: 12 }} type="warning" showIcon message="No manual journal dated in this month can be posted once the period is closed." />
+        )}
+        <Input.TextArea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional): what was checked or posted" />
+      </Modal>
     </div>
   );
 };

@@ -16,8 +16,12 @@ const { getNextNumber } = require('../services/documentNumbering');
 const { extractInvoice, normalizeDate, toNumber } = require('../services/invoiceExtraction.service');
 const { ExtractionError, GSTIN_RE, PAN_RE } = require('../services/vendorExtraction.service');
 const { limitOf } = require('../services/billApproval.service');
+const { readScope } = require('../config/dataAccess');
+const { hasPermission } = require('../utils/permission');
 const credit = require('../services/arCredit.service');
 const arJournal = require('../services/arJournal.service');
+const arPeriod = require('../services/arPeriod.service');
+const approvals = require('../services/arApproval.service');
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 const round3 = (n) => Math.round(Number(n || 0) * 1000) / 1000;
@@ -45,7 +49,13 @@ function customerInput(body) {
     email: text(body.email), phone: text(body.phone, 50), contact_person: text(body.contact_person, 150),
     address: text(body.address, 2000), shipping_address: text(body.shipping_address, 2000),
     payment_terms_days: body.payment_terms_days === undefined || body.payment_terms_days === null || body.payment_terms_days === '' ? 30 : Number(body.payment_terms_days),
-    credit_limit: body.credit_limit === undefined || body.credit_limit === null || body.credit_limit === '' ? null : round2(body.credit_limit)
+    credit_limit: body.credit_limit === undefined || body.credit_limit === null || body.credit_limit === '' ? null : round2(body.credit_limit),
+    // Customer master (FDS section 3): trade name, country, currency, registration no.
+    trade_name: text(body.trade_name), country: text(body.country, 60) || 'India',
+    currency: (text(body.currency, 3) || 'INR').toUpperCase(), registration_number: text(body.registration_number, 50),
+    // Early-payment terms, e.g. 1 % within 10 days (blueprint O2C step 7)
+    discount_percent: body.discount_percent === undefined || body.discount_percent === null || body.discount_percent === '' ? 0 : round2(body.discount_percent),
+    discount_days: body.discount_days === undefined || body.discount_days === null || body.discount_days === '' ? 0 : Number(body.discount_days)
   };
   let problem = null;
   if (!out.customer_name) problem = 'Enter the customer name';
@@ -55,6 +65,11 @@ function customerInput(body) {
   else if (out.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(out.email)) problem = 'The email address is not valid';
   else if (!Number.isInteger(out.payment_terms_days) || out.payment_terms_days < 0 || out.payment_terms_days > 365) problem = 'Payment terms must be between 0 and 365 days';
   else if (out.credit_limit !== null && !(out.credit_limit >= 0)) problem = 'The credit limit cannot be negative';
+  else if (!/^[A-Z]{3}$/.test(out.currency)) problem = 'The currency must be a 3-letter code, e.g. INR';
+  else if (!(out.discount_percent >= 0 && out.discount_percent <= 20)) problem = 'The early-payment discount must be between 0 and 20%';
+  else if (!Number.isInteger(out.discount_days) || out.discount_days < 0 || out.discount_days > out.payment_terms_days) problem = 'The discount days must be between 0 and the payment terms';
+  else if (out.discount_percent > 0 && out.discount_days === 0) problem = 'Say within how many days the early-payment discount applies';
+  if (out.discount_percent === 0) out.discount_days = 0;
   if (out.gst_number && !out.pan) out.pan = out.gst_number.slice(2, 12);
   return { data: out, problem };
 }
@@ -63,7 +78,10 @@ function customerInput(body) {
 function verifyBlock(customer, user, creditLimit) {
   const limit = limitOf(user.role);
   if (limit === 0) return 'Your role does not verify customers or approve credit limits';
-  if (creditLimit !== null && creditLimit !== undefined && Number(creditLimit) > limit) return `A credit limit of ${inr(creditLimit)} is above your approval limit of ${inr(limit)}`;
+  // No credit limit means unlimited credit, so only an approver with no ceiling may allow it.
+  const noLimit = creditLimit === null || creditLimit === undefined;
+  if (noLimit && Number.isFinite(limit)) return `No credit limit means unlimited credit, which needs the Director / CFO. Set a credit limit up to your approval limit of ${inr(limit)}`;
+  if (!noLimit && Number(creditLimit) > limit) return `A credit limit of ${inr(creditLimit)} is above your approval limit of ${inr(limit)}`;
   if (customer && customer.created_by && Number(customer.created_by) === Number(user.id) && customer.status === 'PENDING') return 'You added this customer, so someone else must verify it';
   return null;
 }
@@ -72,7 +90,10 @@ exports.listCustomers = async (req, res) => {
   const tenantWhere = buildAdminWhere(req);
   const [customers, invoices] = await Promise.all([
     ArCustomer.findAll({ where: tenantWhere, order: [['customer_name', 'ASC']], limit: 2000 }),
-    ArInvoice.findAll({ where: { ...tenantWhere, status: credit.OPEN_INVOICE }, attributes: ['customer_id', 'total_amount', 'amount_received', 'tds_deducted', 'due_date'] })
+    ArInvoice.findAll({
+      where: { ...tenantWhere, status: credit.OPEN_INVOICE },
+      attributes: ['customer_id', 'total_amount', 'amount_received', 'tds_deducted', 'credited_amount', 'discount_allowed', 'written_off_amount', 'due_date']
+    })
   ]);
   const now = today();
   const byCustomer = {};
@@ -93,7 +114,10 @@ exports.listCustomers = async (req, res) => {
     return {
       ...c.toJSON(), outstanding: round2(s.outstanding), overdue: round2(s.overdue), oldest_overdue_days: s.oldest_overdue_days,
       open_invoices: s.open_invoices, credit_used_percent: limit ? Math.round((s.outstanding / limit) * 100) : null,
-      can_verify: c.status === 'PENDING' && !verifyBlock(c, req.user, limit)
+      // Credit limits are reviewed yearly (blueprint O2C step 1): flag the ones past their review date.
+      review_due: c.status === 'ACTIVE' && !!c.credit_review_date && c.credit_review_date < now,
+      // A customer added without a limit can still be verified: the approver sets one at verification.
+      can_verify: c.status === 'PENDING' && !verifyBlock(c, req.user, limit === null ? 0 : limit)
     };
   });
   return res.json({ success: true, data, meta: { my_limit: Number.isFinite(myLimit) ? myLimit : null, can_approve: myLimit > 0 } });
@@ -115,8 +139,14 @@ exports.createCustomer = async (req, res) => {
   });
   if (clash) return fail(res, 409, `${clash.customer_name} is already a customer${clash.gst_number === data.gst_number && data.gst_number ? ' with this GSTIN' : ''}`);
   // A new customer waits for a second person to verify it and approve the credit limit.
-  const customer = await ArCustomer.create({ client_id: clientId, ...data, status: 'PENDING', created_by: req.user.id });
+  const customer = await sequelize.transaction(async (transaction) => ArCustomer.create({
+    client_id: clientId, ...data, customer_code: await getNextNumber(clientId, 'AR_CUSTOMER', transaction), status: 'PENDING', created_by: req.user.id
+  }, { transaction }));
   await recordAudit(req, { module: 'AR', entityType: 'AR_CUSTOMER', entityId: customer.id, action: 'AR_CUSTOMER_CREATED', after: customer, note: 'Added; waiting for verification' });
+  approvals.notify({
+    clientId, roles: approvals.rolesCovering(customer.credit_limit || 0), except: req.user.id, subject: `Customer to verify: ${customer.customer_name}`,
+    lines: [`${customer.customer_name} (${customer.customer_code}) was added and is waiting for verification${customer.credit_limit === null ? '' : `, with a proposed credit limit of ${inr(customer.credit_limit)}`}.`, 'Open LedgerLine, Accounts Receivable, Customers to verify it.']
+  });
   return res.status(201).json({ success: true, message: 'Customer added. It needs to be verified before orders can be confirmed.', data: customer });
 };
 
@@ -128,9 +158,11 @@ exports.updateCustomer = async (req, res) => {
   const before = customer.toJSON();
   const identityChanged = ['customer_name', 'gst_number', 'pan'].some((k) => (before[k] || null) !== (data[k] || null));
   const limitChanged = (before.credit_limit === null ? null : Number(before.credit_limit)) !== data.credit_limit;
-  // Name, GSTIN, PAN and the credit limit are maker-checker: a change by someone who cannot
-  // approve it sends the customer back for verification.
-  const needsCheck = (identityChanged || limitChanged) && customer.status === 'ACTIVE' && !!verifyBlock(null, req.user, data.credit_limit);
+  const termsChanged = Number(before.payment_terms_days) !== data.payment_terms_days
+    || Number(before.discount_percent || 0) !== data.discount_percent || Number(before.discount_days || 0) !== data.discount_days;
+  // Name, GSTIN, PAN, the credit limit and the commercial terms are maker-checker: a change by
+  // someone who cannot approve it sends the customer back for verification.
+  const needsCheck = (identityChanged || limitChanged || termsChanged) && customer.status === 'ACTIVE' && !!verifyBlock(null, req.user, data.credit_limit);
   try {
     await customer.update({ ...data, ...(needsCheck ? { status: 'PENDING', verified_by: null, verified_at: null, created_by: req.user.id } : {}) });
   } catch (error) {
@@ -138,6 +170,12 @@ exports.updateCustomer = async (req, res) => {
     throw error;
   }
   await recordAudit(req, { module: 'AR', entityType: 'AR_CUSTOMER', entityId: customer.id, action: 'AR_CUSTOMER_UPDATED', before, after: customer, note: needsCheck ? 'Changed; sent for verification' : null });
+  if (needsCheck) {
+    approvals.notify({
+      clientId: customer.client_id, roles: approvals.rolesCovering(customer.credit_limit || 0), except: req.user.id, subject: `Customer change to verify: ${customer.customer_name}`,
+      lines: [`${customer.customer_name} was changed (name, tax IDs, credit limit or terms) and needs verifying again before new orders can be confirmed.`]
+    });
+  }
   return res.json({ success: true, message: needsCheck ? 'Saved. The change needs to be verified by an approver.' : 'Customer saved', data: customer });
 };
 
@@ -148,7 +186,8 @@ exports.verifyCustomer = async (req, res) => {
   const approve = req.body?.action !== 'reject';
   const creditLimit = req.body?.credit_limit === undefined ? (customer.credit_limit === null ? null : Number(customer.credit_limit))
     : (req.body.credit_limit === null || req.body.credit_limit === '' ? null : round2(req.body.credit_limit));
-  const block = verifyBlock(customer, req.user, approve ? creditLimit : null);
+  // Rejecting sets no credit limit, so only the role and the maker-checker rule apply.
+  const block = verifyBlock(customer, req.user, approve ? creditLimit : 0);
   if (block) return fail(res, 403, block);
   const before = customer.toJSON();
   if (!approve) {
@@ -158,7 +197,13 @@ exports.verifyCustomer = async (req, res) => {
   } else {
     const terms = req.body?.payment_terms_days === undefined ? customer.payment_terms_days : Number(req.body.payment_terms_days);
     if (!Number.isInteger(terms) || terms < 0 || terms > 365) return fail(res, 422, 'Payment terms must be between 0 and 365 days');
-    await customer.update({ status: 'ACTIVE', hold_reason: null, credit_limit: creditLimit, payment_terms_days: terms, verified_by: req.user.id, verified_at: new Date() });
+    if (Number(customer.discount_days || 0) > terms) return fail(res, 422, 'The early-payment discount days are longer than the payment terms');
+    // Credit limits are reviewed once a year (blueprint O2C step 1).
+    const review = normalizeDate(req.body?.credit_review_date) || new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10);
+    await sequelize.transaction(async (transaction) => customer.update({
+      status: 'ACTIVE', hold_reason: null, credit_limit: creditLimit, payment_terms_days: terms, verified_by: req.user.id, verified_at: new Date(),
+      credit_review_date: review, customer_code: customer.customer_code || await getNextNumber(customer.client_id, 'AR_CUSTOMER', transaction)
+    }, { transaction }));
   }
   await recordAudit(req, {
     module: 'AR', entityType: 'AR_CUSTOMER', entityId: customer.id, action: approve ? 'AR_CUSTOMER_VERIFIED' : 'AR_CUSTOMER_REJECTED', before, after: customer,
@@ -205,9 +250,12 @@ function orderLines(raw) {
     const quantity = round3(toNumber(l.quantity));
     const rate = round2(toNumber(l.rate));
     const gst = toNumber(l.gst_percent);
+    const discount = round2(toNumber(l.discount_percent) ?? 0);
+    // Amount is after the line discount; GST is charged on the discounted value.
     return {
       line_no: i + 1, description: text(l.description, 500), hsn_code: text(l.hsn_code, 20), unit: text(l.unit, 20),
-      quantity, rate, gst_percent: gst === null ? 0 : gst, amount: round2(quantity * rate)
+      quantity, rate, discount_percent: discount, gst_percent: gst === null ? 0 : gst,
+      amount: round2(quantity * credit.netRate({ rate, discount_percent: discount }))
     };
   });
   let problem = null;
@@ -215,6 +263,7 @@ function orderLines(raw) {
   else if (lines.some((l) => !l.description)) problem = 'Every item needs a description';
   else if (lines.some((l) => !(l.quantity > 0))) problem = 'Every item needs a quantity above zero';
   else if (lines.some((l) => !(l.rate >= 0))) problem = 'Every item needs a rate';
+  else if (lines.some((l) => !(l.discount_percent >= 0 && l.discount_percent < 100))) problem = 'Discount % must be between 0 and 99';
   else if (lines.some((l) => l.gst_percent < 0 || l.gst_percent > 100)) problem = 'GST % must be between 0 and 100';
   const subtotal = round2(lines.reduce((s, l) => s + l.amount, 0));
   const tax = round2(lines.reduce((s, l) => s + (l.amount * l.gst_percent) / 100, 0));
@@ -245,8 +294,20 @@ async function refreshOrderStatus(orderId, transaction) {
   return order;
 }
 
+/** A Requester (own scope) sees only the quotations they raised, as with purchase requisitions. */
+const orderScope = (req) => (readScope(req.user?.role, 'AR_ORDER') === 'own' ? { created_by: req.user.id } : {});
+/** Confirming an order, or cancelling one that is not your own quotation, needs AR_ORDER edit. */
+const mayManageOrders = (req) => hasPermission(req.user, 'AR_ORDER', 'edit');
+const CANCELLABLE = ['QUOTATION', 'CREDIT_HOLD', 'CONFIRMED'];
+const cancelBlock = (order, req, manage) => {
+  if (!CANCELLABLE.includes(order.status)) return 'An order with deliveries cannot be cancelled';
+  if (manage) return null;
+  const own = Number(order.created_by) === Number(req.user.id);
+  return order.status === 'QUOTATION' && own ? null : 'You can cancel only a quotation you raised. Ask Accounts Receivable to cancel an order.';
+};
+
 exports.listOrders = async (req, res) => {
-  const where = { ...buildAdminWhere(req) };
+  const where = { ...buildAdminWhere(req), ...orderScope(req) };
   if (req.query.status) where.status = String(req.query.status).split(',');
   const rows = await ArSalesOrder.findAll({ where, include: orderInclude, order: [['id', 'DESC']], limit: 1000 });
   const data = rows.map((o) => {
@@ -268,13 +329,14 @@ exports.listOrders = async (req, res) => {
 
 exports.getOrder = async (req, res) => {
   const tenantWhere = buildAdminWhere(req);
-  const order = await ArSalesOrder.findOne({ where: { ...tenantWhere, id: req.params.id }, include: orderInclude });
+  const order = await ArSalesOrder.findOne({ where: { ...tenantWhere, ...orderScope(req), id: req.params.id }, include: orderInclude });
   if (!order) return fail(res, 404, 'Order not found');
-  const [deliveries, invoices, history, names] = await Promise.all([
+  const [deliveries, invoices, history, names, manage] = await Promise.all([
     ArDelivery.findAll({ where: { order_id: order.id }, include: [{ model: ArDeliveryItem, as: 'items' }], order: [['id', 'ASC']] }),
     ArInvoice.findAll({ where: { sales_order_id: order.id }, attributes: ['id', 'invoice_number', 'invoice_date', 'total_amount', 'status', 'delivery_id'], order: [['id', 'ASC']] }),
     documentHistory(tenantWhere, 'AR_SALES_ORDER', order.id),
-    userNames([order.created_by, order.credit_released_by])
+    userNames([order.created_by, order.credit_released_by]),
+    mayManageOrders(req)
   ]);
   // A quotation shows what the credit check would say if it were confirmed now.
   const preview = order.status === 'QUOTATION' && order.customer ? await credit.check(order.customer, order) : null;
@@ -285,7 +347,8 @@ exports.getOrder = async (req, res) => {
       ...data, deliveries, invoices, history, credit_preview: preview,
       created_by_name: names[order.created_by] || null, credit_released_by_name: names[order.credit_released_by] || null,
       can_release: data.status === 'CREDIT_HOLD' && !credit.releaseBlock(data, req.user),
-      release_block: data.status === 'CREDIT_HOLD' ? credit.releaseBlock(data, req.user) : null
+      release_block: data.status === 'CREDIT_HOLD' ? credit.releaseBlock(data, req.user) : null,
+      can_cancel: !cancelBlock(order, req, manage)
     }
   });
 };
@@ -313,7 +376,7 @@ exports.extractOrder = async (req, res) => {
         items: result.line_items.map((l) => ({
           description: l.description, quantity: l.quantity ?? 1,
           rate: l.unit_price ?? (l.amount !== null && l.quantity ? round2(l.amount / l.quantity) : l.amount ?? 0),
-          gst_percent: l.tax_rate_percent ?? headerRate ?? 0
+          discount_percent: 0, gst_percent: l.tax_rate_percent ?? headerRate ?? 0
         })),
         matches: { customer: customer ? { id: customer.id, customer_name: customer.customer_name, status: customer.status, matched_by: matchedBy } : null }
       }
@@ -335,6 +398,15 @@ async function confirm(order, customer, transaction) {
   return result;
 }
 
+/** Tells the approvers whose limit covers a held order that it is waiting for release. */
+function notifyHold(order, customer, result, userId) {
+  if (result.passed) return;
+  approvals.notify({
+    clientId: order.client_id, roles: approvals.rolesCovering(order.total_amount), except: userId, subject: `Order on credit hold: ${order.order_number}`,
+    lines: [`${order.order_number} for ${customer.customer_name} (${inr(order.total_amount)}) stopped at the credit check.`, ...result.reasons, `Release needs ${result.release_needs}, and not the person who raised the order.`]
+  });
+}
+
 exports.createOrder = async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return fail(res, 400, 'Select a company before raising orders');
@@ -345,6 +417,7 @@ exports.createOrder = async (req, res) => {
   const { lines, problem, totals } = orderLines(body.items);
   if (problem) return fail(res, 422, problem);
   const asOrder = body.as === 'ORDER';
+  if (asOrder && !(await mayManageOrders(req))) return fail(res, 403, 'Save it as a quotation. Accounts Receivable confirms it as an order and runs the credit check.');
   if (asOrder && customer.status === 'PENDING') return fail(res, 409, `${customer.customer_name} is not verified yet. Save this as a quotation, or have the customer verified first.`);
   const orderDate = normalizeDate(body.order_date) || today();
   const { order, result } = await sequelize.transaction(async (transaction) => {
@@ -361,6 +434,7 @@ exports.createOrder = async (req, res) => {
     module: 'AR', entityType: 'AR_SALES_ORDER', entityId: order.id, action: asOrder ? (result.passed ? 'AR_ORDER_CONFIRMED' : 'AR_ORDER_CREDIT_HOLD') : 'AR_QUOTATION_CREATED', after: order,
     note: asOrder ? (result.passed ? 'Credit check passed' : result.reasons.join('; ')) : `Quotation for ${inr(order.total_amount)}`
   });
+  if (asOrder) notifyHold(order, customer, result, req.user.id);
   const message = !asOrder ? `Quotation ${order.quotation_number} saved`
     : result.passed ? `Order ${order.order_number} confirmed. Credit check passed.` : `Order ${order.order_number} is on credit hold: ${result.reasons[0]}`;
   return res.status(201).json({ success: true, message, data: decorateOrder(await ArSalesOrder.findByPk(order.id, { include: orderInclude })) });
@@ -403,6 +477,7 @@ exports.confirmOrder = async (req, res) => {
     module: 'AR', entityType: 'AR_SALES_ORDER', entityId: order.id, action: result.passed ? 'AR_ORDER_CONFIRMED' : 'AR_ORDER_CREDIT_HOLD', before, after: order,
     note: result.passed ? 'Credit check passed' : result.reasons.join('; ')
   });
+  notifyHold(order, customer, result, req.user.id);
   return res.json({
     success: true, message: result.passed ? `Order ${order.order_number} confirmed. Credit check passed.` : `Order ${order.order_number} is on credit hold: ${result.reasons[0]}`,
     data: decorateOrder(order)
@@ -410,7 +485,7 @@ exports.confirmOrder = async (req, res) => {
 };
 
 exports.releaseOrder = async (req, res) => {
-  const order = await ArSalesOrder.findOne({ where: { ...buildAdminWhere(req), id: req.params.id }, include: orderInclude });
+  const order = await ArSalesOrder.findOne({ where: { ...buildAdminWhere(req), ...orderScope(req), id: req.params.id }, include: orderInclude });
   if (!order) return fail(res, 404, 'Order not found');
   if (order.status !== 'CREDIT_HOLD') return fail(res, 409, 'This order is not on credit hold');
   const block = credit.releaseBlock(order, req.user);
@@ -424,9 +499,10 @@ exports.releaseOrder = async (req, res) => {
 };
 
 exports.cancelOrder = async (req, res) => {
-  const order = await ArSalesOrder.findOne({ where: { ...buildAdminWhere(req), id: req.params.id }, include: orderInclude });
+  const order = await ArSalesOrder.findOne({ where: { ...buildAdminWhere(req), ...orderScope(req), id: req.params.id }, include: orderInclude });
   if (!order) return fail(res, 404, 'Order not found');
-  if (!['QUOTATION', 'CREDIT_HOLD', 'CONFIRMED'].includes(order.status)) return fail(res, 409, 'An order with deliveries cannot be cancelled');
+  const block = cancelBlock(order, req, await mayManageOrders(req));
+  if (block) return fail(res, CANCELLABLE.includes(order.status) ? 403 : 409, block);
   const reason = text(req.body?.reason);
   if (!reason) return fail(res, 400, 'Give a reason for cancelling');
   const before = order.toJSON();
@@ -454,7 +530,10 @@ exports.listDeliveries = async (req, res) => {
   const where = { ...buildAdminWhere(req) };
   if (req.query.status) where.status = String(req.query.status).split(',');
   const rows = await ArDelivery.findAll({ where, include: deliveryInclude, order: [['id', 'DESC']], limit: 1000 });
-  const data = rows.map(decorateDelivery);
+  const data = rows.map((r) => {
+    const d = decorateDelivery(r);
+    return { ...d, invoice_block: d.can_invoice ? invoiceBlock(d, req.user) : null };
+  });
   return res.json({
     success: true, data,
     summary: {
@@ -509,7 +588,7 @@ exports.confirmDelivery = async (req, res) => {
   const deliveredDate = normalizeDate(req.body?.delivered_date) || today();
   if (deliveredDate < delivery.dispatch_date) return fail(res, 422, 'The delivery date cannot be before the dispatch date');
   const before = delivery.toJSON();
-  await delivery.update({ status: 'DELIVERED', delivered_date: deliveredDate, received_by: receivedBy, delivery_note: text(req.body?.delivery_note) });
+  await delivery.update({ status: 'DELIVERED', delivered_date: deliveredDate, received_by: receivedBy, delivery_note: text(req.body?.delivery_note), confirmed_by: req.user.id });
   await recordAudit(req, { module: 'AR', entityType: 'AR_DELIVERY', entityId: delivery.id, action: 'AR_DELIVERY_CONFIRMED', before, after: delivery, note: `Received by ${receivedBy}` });
   return res.json({ success: true, message: `Delivery ${delivery.delivery_number} confirmed. It can now be invoiced.`, data: delivery });
 };
@@ -539,8 +618,13 @@ exports.cancelDelivery = async (req, res) => {
 async function invoiceDraft(delivery) {
   const lines = delivery.items.map((it) => {
     const o = it.orderItem;
-    const amount = round2(Number(it.quantity) * Number(o.rate));
-    return { description: o.description, hsn_code: o.hsn_code, unit: o.unit, quantity: Number(it.quantity), rate: Number(o.rate), gst_percent: Number(o.gst_percent), amount, gst_amount: round2((amount * Number(o.gst_percent)) / 100) };
+    // Billed at the order's rate after its line discount.
+    const rate = credit.netRate(o);
+    const amount = round2(Number(it.quantity) * rate);
+    return {
+      description: o.description, hsn_code: o.hsn_code, unit: o.unit, quantity: Number(it.quantity), list_rate: Number(o.rate),
+      discount_percent: Number(o.discount_percent || 0), rate, gst_percent: Number(o.gst_percent), amount, gst_amount: round2((amount * Number(o.gst_percent)) / 100)
+    };
   });
   const subtotal = round2(lines.reduce((s, l) => s + l.amount, 0));
   const tax = round2(lines.reduce((s, l) => s + l.gst_amount, 0));
@@ -552,21 +636,42 @@ exports.invoicePreview = async (req, res) => {
   const delivery = await ArDelivery.findOne({ where: { ...buildAdminWhere(req), id: req.params.id }, include: deliveryInclude });
   if (!delivery) return fail(res, 404, 'Delivery not found');
   const draft = await invoiceDraft(delivery);
-  const invoiceDate = today();
+  // The due date counts from the invoice date chosen in the window (today if none yet).
+  const invoiceDate = normalizeDate(req.query?.invoice_date) || today();
   const names = await arJournal.accountNames(delivery.client_id);
   const journal = arJournal.invoiceLines(names, { ...draft, invoice_number: '(new)' }, delivery.customer?.customer_name).filter((l) => l.debit > 0 || l.credit > 0);
-  return res.json({ success: true, data: { ...draft, invoice_date: invoiceDate, due_date: addDays(invoiceDate, delivery.customer?.payment_terms_days ?? 30), journal } });
+  const block = invoiceBlock(delivery, req.user);
+  return res.json({
+    success: true,
+    data: { ...draft, invoice_date: invoiceDate, due_date: addDays(invoiceDate, delivery.customer?.payment_terms_days ?? 30), journal, can_invoice: !block, invoice_block: block }
+  });
 };
+
+/**
+ * Shipping and invoicing are kept separate (blueprint O2C step 3): whoever dispatched the goods or
+ * recorded the proof of delivery may not raise its invoice.
+ */
+function invoiceBlock(delivery, user) {
+  const me = Number(user.id);
+  if (Number(delivery.created_by) === me) return 'You dispatched this delivery, so someone else must raise its invoice (shipping and invoicing are kept separate)';
+  if (Number(delivery.confirmed_by) === me) return 'You recorded the proof of delivery, so someone else must raise its invoice (shipping and invoicing are kept separate)';
+  return null;
+}
 
 /** Raises the customer invoice from a confirmed delivery: only what was delivered can be billed. */
 exports.invoiceDelivery = async (req, res) => {
   const invoiceDate = normalizeDate(req.body?.invoice_date) || today();
+  if (invoiceDate > today()) return fail(res, 422, 'The invoice date cannot be in the future');
   const outcome = await sequelize.transaction(async (transaction) => {
     const delivery = await ArDelivery.findOne({ where: { ...buildAdminWhere(req), id: req.params.id }, include: deliveryInclude, transaction });
     if (!delivery) return { status: 404, message: 'Delivery not found' };
     if (delivery.invoice_id) return { status: 409, message: `This delivery is already invoiced (${delivery.invoice?.invoice_number || 'invoice'})` };
     if (delivery.status !== 'DELIVERED') return { status: 409, message: 'Confirm the delivery (proof of delivery) before invoicing it' };
     if (invoiceDate < delivery.delivered_date) return { status: 422, message: 'The invoice date cannot be before the delivery date' };
+    const block = invoiceBlock(delivery, req.user);
+    if (block) return { status: 403, message: block };
+    const locked = await arPeriod.lockMessage(delivery.client_id, invoiceDate);
+    if (locked) return { status: 423, message: locked };
     await ArDelivery.findByPk(delivery.id, { transaction, lock: transaction.LOCK.UPDATE });
     const draft = await invoiceDraft(delivery);
     const invoice = await ArInvoice.create({

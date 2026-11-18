@@ -13,11 +13,13 @@
  *   SECOND     8-15 days overdue        firm reminder
  *   FINAL      16-30 days overdue       final notice
  *   ESCALATED  more than 30 days        escalation; shown to the manager on the worklist
- * No reminder goes out while the customer has an open promise to pay that has not fallen due.
+ * No reminder goes out while the customer has an open promise to pay that has not fallen due, nor
+ * while the invoice is in dispute (a credit note request waiting for a decision, blueprint step 5).
  */
 const { Op } = require('sequelize');
-const { ArInvoice, ArCustomer, ArReminder, ArPromise, Client } = require('../models');
+const { ArInvoice, ArCustomer, ArReminder, ArPromise, ArCreditNote, Client } = require('../models');
 const notificationEmail = require('./notificationEmail.service');
+const { outstandingOf } = require('./arCredit.service');
 
 const LADDER = [
   { stage: 'UPCOMING', label: 'Due soon', from: -3, to: 0, tone: 'a friendly heads-up that the invoice falls due shortly' },
@@ -33,7 +35,22 @@ const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractio
 const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const today = () => new Date().toISOString().slice(0, 10);
 const daysBetween = (from, to) => Math.floor((new Date(to) - new Date(from)) / 86400000);
-const outstandingOf = (inv) => Math.max(0, Number(inv.total_amount) - Number(inv.amount_received || 0) - Number(inv.tds_deducted || 0));
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** A date as the rest of the app shows it: 11 Oct 2026 (not 2026-10-11). */
+const fmtDate = (d) => {
+  if (!d) return '—';
+  const s = d instanceof Date
+    ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    : String(d).slice(0, 10);
+  const [y, m, day] = s.split('-');
+  return MONTHS[Number(m) - 1] ? `${day} ${MONTHS[Number(m) - 1]} ${y}` : String(d);
+};
+
+/** Invoices in dispute: a credit note request is waiting for a decision. Reminders pause for them. */
+async function disputedInvoiceIds(clientId = null) {
+  const rows = await ArCreditNote.findAll({ where: { ...(clientId ? { client_id: clientId } : {}), status: 'PENDING_APPROVAL' }, attributes: ['invoice_id'] });
+  return new Set(rows.map((r) => r.invoice_id));
+}
 
 /** Days past the due date (negative before it); null when the invoice has no due date. */
 const daysOverdueOf = (invoice) => (invoice.due_date ? daysBetween(invoice.due_date, today()) : null);
@@ -48,20 +65,24 @@ function stageOf(invoice) {
 const WORDING = {
   UPCOMING: (d) => `This is a friendly reminder that invoice ${d.number} dated ${d.date} for ${d.total} falls due on ${d.due}. The balance payable is ${d.outstanding}.\n\nIf payment is already scheduled, please ignore this note.`,
   FIRST: (d) => `This is a reminder that invoice ${d.number} dated ${d.date} for ${d.total} was due on ${d.due} (${d.overdue}). The outstanding balance is ${d.outstanding}.\n\nPlease arrange payment at the earliest, or let us know if it has already been made.`,
-  SECOND: (d) => `Invoice ${d.number} dated ${d.date} is now ${d.overdue}, and ${d.outstanding} remains unpaid. We have written to you about this before.\n\nPlease confirm the date on which payment will be made.`,
+  // "Written to you before" / "earlier reminders" only when a reminder for this invoice was actually emailed.
+  SECOND: (d) => `Invoice ${d.number} dated ${d.date} is now ${d.overdue}, and ${d.outstanding} remains unpaid.${d.emailedBefore ? ' We have written to you about this before.' : ''}\n\nPlease confirm the date on which payment will be made.`,
   FINAL: (d) => `Final notice: invoice ${d.number} dated ${d.date} is ${d.overdue}, with ${d.outstanding} unpaid.\n\nPlease pay within 7 days. If we do not hear from you, the account will be escalated and new orders may be put on hold.`,
-  ESCALATED: (d) => `Invoice ${d.number} dated ${d.date} is ${d.overdue} and ${d.outstanding} is still unpaid despite our earlier reminders.\n\nThe account has been escalated and further supplies may be held until it is settled. Please contact us today to resolve this.`
+  ESCALATED: (d) => `Invoice ${d.number} dated ${d.date} is ${d.overdue} and ${d.outstanding} is still unpaid${d.emailedBefore ? ' despite our earlier reminders' : ''}.\n\nThe account has been escalated and further supplies may be held until it is settled. Please contact us today to resolve this.`
 };
 
 async function facts(invoice) {
-  const company = await Client.findByPk(invoice.client_id, { attributes: ['client_name'] });
+  const [company, emailedBefore] = await Promise.all([
+    Client.findByPk(invoice.client_id, { attributes: ['client_name'] }),
+    invoice.id ? ArReminder.count({ where: { invoice_id: invoice.id, delivery: 'EMAILED' } }) : 0
+  ]);
   const days = daysOverdueOf(invoice);
   const overdueDays = days && days > 0 ? days : 0;
   return {
     companyName: company?.client_name || 'our company',
     customerName: invoice.customer?.customer_name || 'Customer',
-    number: invoice.invoice_number, date: invoice.invoice_date, due: invoice.due_date || '—',
-    total: inr(invoice.total_amount), outstanding: inr(outstandingOf(invoice)),
+    number: invoice.invoice_number, date: fmtDate(invoice.invoice_date), due: fmtDate(invoice.due_date),
+    total: inr(invoice.total_amount), outstanding: inr(outstandingOf(invoice)), emailedBefore: emailedBefore > 0,
     overdueDays, overdue: overdueDays ? `${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue` : 'not yet overdue'
   };
 }
@@ -100,7 +121,7 @@ async function draftReminder(invoice) {
     Number(invoice.amount_received) > 0 ? `Part payment already received: ${inr(invoice.amount_received)}` : 'No payment received yet',
     `Reminders already sent for this invoice: ${reminders}`,
     `Invoices this customer has paid in full before: ${paidCount}`,
-    promises.length ? `Promises to pay: ${promises.map((p) => `${inr(p.amount)} by ${p.promised_date} (${p.status.toLowerCase()})`).join('; ')}` : 'No promises to pay recorded',
+    promises.length ? `Promises to pay: ${promises.map((p) => `${inr(p.amount)} by ${fmtDate(p.promised_date)} (${p.status.toLowerCase()})`).join('; ')}` : 'No promises to pay recorded',
     `This message should be: ${step?.tone || 'a polite reminder'}`
   ].join('\n');
   try {
@@ -171,8 +192,10 @@ async function remindOverdue({ clientId = null, userId = null, minDaysBetween = 
     include: [{ model: ArCustomer, as: 'customer' }],
     limit: 500
   });
+  const disputed = await disputedInvoiceIds(clientId);
   const results = [];
   for (const invoice of invoices) {
+    if (disputed.has(invoice.id)) continue;
     const reminder = await sendReminder(invoice, { userId });
     results.push({ invoice_id: invoice.id, invoice_number: invoice.invoice_number, delivery: reminder.delivery, note: reminder.delivery_note });
   }
@@ -211,10 +234,12 @@ async function runLadder({ clientId = null } = {}) {
     ],
     limit: 1000
   });
+  const disputed = await disputedInvoiceIds(clientId);
   const results = [];
   for (const invoice of invoices) {
     const step = stageOf(invoice);
     if (!step) continue;
+    if (disputed.has(invoice.id)) continue;
     if (invoice.promises.some((p) => p.status === 'OPEN' && p.promised_date >= today())) continue;
     // Never two reminders for one invoice within 3 days, whatever sent the last one.
     if (invoice.last_reminder_at && Date.now() - new Date(invoice.last_reminder_at).getTime() < 3 * 86400000) continue;
@@ -228,4 +253,4 @@ async function runLadder({ clientId = null } = {}) {
   return results;
 }
 
-module.exports = { LADDER, stageOf, daysOverdueOf, templateReminder, draftReminder, sendReminder, remindOverdue, sweepPromises, runLadder };
+module.exports = { LADDER, stageOf, daysOverdueOf, disputedInvoiceIds, templateReminder, draftReminder, sendReminder, remindOverdue, sweepPromises, runLadder, fmtDate };

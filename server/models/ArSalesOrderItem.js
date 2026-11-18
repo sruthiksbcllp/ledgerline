@@ -20,7 +20,9 @@ module.exports = (sequelize, DataTypes) => {
     gst_percent: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 0 },
     amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 },
     delivered_qty: { type: DataTypes.DECIMAL(15, 3), allowNull: false, defaultValue: 0 },
-    invoiced_qty: { type: DataTypes.DECIMAL(15, 3), allowNull: false, defaultValue: 0 }
+    invoiced_qty: { type: DataTypes.DECIMAL(15, 3), allowNull: false, defaultValue: 0 },
+    // Discount off the rate on this line; above 10 % the order needs approval (blueprint step 2)
+    discount_percent: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 0 }
   }, {
     sequelize,
     modelName: 'ArSalesOrderItem',

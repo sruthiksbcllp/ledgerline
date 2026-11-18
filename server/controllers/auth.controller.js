@@ -128,7 +128,7 @@ const sessionUser = (user, accountRole, ctx) => {
 const effectivePermissions = (role) => {
   const { roleAllows } = require('../config/rbac');
   const { readScopesFor } = require('../config/dataAccess');
-  const SECTIONS = ['PR', 'RFQ', 'PO', 'GRN', 'INVOICE', 'PAYMENT', 'VENDOR', 'AR', 'FINANCE', 'REPORT', 'AUDIT', 'DASHBOARD'];
+  const SECTIONS = ['PR', 'RFQ', 'PO', 'GRN', 'INVOICE', 'PAYMENT', 'VENDOR', 'AR', 'AR_CUSTOMER', 'AR_ORDER', 'AR_DELIVERY', 'AR_APPROVE', 'R2R', 'FINANCE', 'REPORT', 'AUDIT', 'DASHBOARD'];
   const permissions = [];
   SECTIONS.forEach((module) => ['view', 'add', 'edit', 'delete'].forEach((action) => {
     if (roleAllows(role, module, action)) permissions.push({ module, action: action.toUpperCase() });

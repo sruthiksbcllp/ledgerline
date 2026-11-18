@@ -7,8 +7,9 @@ import { ClipboardList, FilePlus2, PackageCheck, Plus, RefreshCcw, Sparkles, Tra
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api from '../../utils/api';
-import { AI_ACCEPT, checkUploadFile, historyItems } from '../../utils/documentReview';
-import { ArFlow, ArStatus, JournalLines, PageHeader, Tiles } from '../../components/ar/ArShared';
+import { AI_ACCEPT, checkUploadFile } from '../../utils/documentReview';
+import { getStoredUser, hasPerm } from '../../utils/session';
+import { ArFlow, ArStatus, ArTasks, JournalLines, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
 import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
 const { Text } = Typography;
@@ -20,7 +21,9 @@ const ORDER_FILTERS = [
   { label: 'To invoice', value: 'TO_INVOICE' },
   { label: 'Invoiced', value: 'CLOSED' },
 ];
-const blankItem = () => ({ description: '', quantity: 1, rate: undefined, gst_percent: 18 });
+const blankItem = () => ({ description: '', hsn_code: '', quantity: 1, rate: undefined, discount_percent: 0, gst_percent: 18 });
+/** Line value after its discount (GST is charged on this). */
+const lineNet = (l) => Number(l?.quantity || 0) * Math.round(Number(l?.rate || 0) * (1 - Number(l?.discount_percent || 0) / 100) * 100) / 100;
 
 /** What the credit check found, in words. Shown on a quotation (preview) and on a confirmed or held order. */
 const CreditPanel = ({ check, preview }) => {
@@ -46,8 +49,22 @@ const CreditPanel = ({ check, preview }) => {
 
 const SalesOrders = () => {
   const navigate = useNavigate();
+  // Each step's buttons follow its permission section (server/config/rbac.js): quotations and orders
+  // (AR_ORDER), dispatch and proof of delivery (AR_DELIVERY, Warehouse), invoicing (AR). Releasing a
+  // credit hold follows the approval limit (can_release from the server). A Requester only raises
+  // quotations and follows their own; Accounts Receivable confirms them as orders.
+  const user = getStoredUser();
+  const canQuote = hasPerm(user, 'AR_ORDER', 'ADD');
+  const canChangeOrder = hasPerm(user, 'AR_ORDER', 'EDIT');
+  const canAddCustomer = hasPerm(user, 'AR_CUSTOMER', 'ADD');
+  const canSeeDeliveries = hasPerm(user, 'AR_DELIVERY', 'VIEW');
+  const canShip = hasPerm(user, 'AR_DELIVERY', 'ADD');
+  const canConfirmDelivery = hasPerm(user, 'AR_DELIVERY', 'EDIT');
+  const canSeeInvoices = hasPerm(user, 'AR', 'VIEW');
+  const canBill = hasPerm(user, 'AR', 'ADD');
+  const newLabel = canChangeOrder ? 'New quotation / order' : 'New quotation';
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'deliveries' ? 'deliveries' : 'orders';
+  const tab = canSeeDeliveries && params.get('tab') === 'deliveries' ? 'deliveries' : 'orders';
   const [orders, setOrders] = useState([]);
   const [summary, setSummary] = useState({});
   const [deliveries, setDeliveries] = useState([]);
@@ -78,7 +95,7 @@ const SalesOrders = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [o, d] = await Promise.all([api.get('/ar/orders'), api.get('/ar/deliveries')]);
+      const [o, d] = await Promise.all([api.get('/ar/orders'), canSeeDeliveries ? api.get('/ar/deliveries') : null]);
       setOrders(o?.data?.data || []);
       setSummary(o?.data?.summary || {});
       setDeliveries(d?.data?.data || []);
@@ -88,7 +105,7 @@ const SalesOrders = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canSeeDeliveries]);
   useEffect(() => { load(); }, [load]);
 
   const visible = useMemo(() => {
@@ -99,8 +116,8 @@ const SalesOrders = () => {
   }, [orders, filter]);
 
   const totals = useMemo(() => {
-    const subtotal = items.reduce((s, l) => s + Number(l?.quantity || 0) * Number(l?.rate || 0), 0);
-    const tax = items.reduce((s, l) => s + (Number(l?.quantity || 0) * Number(l?.rate || 0) * Number(l?.gst_percent || 0)) / 100, 0);
+    const subtotal = items.reduce((s, l) => s + lineNet(l), 0);
+    const tax = items.reduce((s, l) => s + (lineNet(l) * Number(l?.gst_percent || 0)) / 100, 0);
     return { subtotal, tax, total: subtotal + tax };
   }, [items]);
 
@@ -126,7 +143,7 @@ const SalesOrders = () => {
       form.setFieldsValue({
         customer_id: d.matches?.customer?.id || undefined,
         customer_po_number: d.customer_po_number || undefined,
-        items: d.items?.length ? d.items.map((l) => ({ description: l.description, quantity: Number(l.quantity || 1), rate: Number(l.rate || 0), gst_percent: Number(l.gst_percent || 0) })) : [blankItem()],
+        items: d.items?.length ? d.items.map((l) => ({ description: l.description, hsn_code: l.hsn_code || '', quantity: Number(l.quantity || 1), rate: Number(l.rate || 0), discount_percent: Number(l.discount_percent || 0), gst_percent: Number(l.gst_percent || 0) })) : [blankItem()],
       });
       setSource(file.name);
       if (d.matches?.customer) message.success(`Read ${d.items?.length || 0} item${d.items?.length === 1 ? '' : 's'} for ${d.matches.customer.customer_name}. Check them before saving.`);
@@ -169,6 +186,7 @@ const SalesOrders = () => {
       message.error(errorOf(e, 'Could not open the order'));
     }
   };
+  useOpenParam(openDetail);
   const act = async (fn, after) => {
     setBusy(true);
     try {
@@ -216,19 +234,27 @@ const SalesOrders = () => {
       message.error(errorOf(e, 'Could not prepare the invoice'));
     }
   };
+  // The due date counts from the invoice date chosen in the window.
+  const previewForDate = async (date) => {
+    if (!invoiceFor || !date) return;
+    try {
+      const res = await api.get(`/ar/deliveries/${invoiceFor.delivery.id}/invoice-preview`, { params: { invoice_date: date.format('YYYY-MM-DD') } });
+      setInvoiceFor((cur) => (cur ? { ...cur, preview: res?.data?.data } : cur));
+    } catch { /* keep the last preview */ }
+  };
   const raiseInvoice = async () => {
     const v = await invoiceForm.validateFields();
     await act(() => api.post(`/ar/deliveries/${invoiceFor.delivery.id}/invoice`, { invoice_date: v.invoice_date?.format('YYYY-MM-DD') }), () => setInvoiceFor(null));
   };
 
   const orderColumns = [
-    { title: 'Number', key: 'number', render: (_, r) => <Space direction="vertical" size={0}><Text strong>{r.number}</Text>{r.order_number && <Text type="secondary" style={{ fontSize: 12 }}>{r.quotation_number}</Text>}</Space> },
+    { title: 'Number', key: 'number', render: (_, r) => <Space direction="vertical" size={0}><Typography.Link strong onClick={() => openDetail(r.id)}>{r.number}</Typography.Link>{r.order_number && <Text type="secondary" style={{ fontSize: 12 }}>{r.quotation_number}</Text>}</Space> },
     { title: 'Customer', key: 'customer', render: (_, r) => r.customer?.customer_name || '—' },
     { title: 'Date', dataIndex: 'order_date', render: fmt },
     { title: 'Customer PO', dataIndex: 'customer_po_number', render: (v) => v || '—' },
     { title: 'Total', dataIndex: 'total_amount', align: 'right', render: (v) => <Text strong>{inr(v)}</Text> },
     { title: 'Status', dataIndex: 'status', render: (v, r) => <Space size={6}><ArStatus status={v} />{r.can_release && <Text type="danger" style={{ fontSize: 12 }}>needs your release</Text>}</Space> },
-    { title: '', key: 'open', render: (_, r) => <Button type="link" onClick={() => openDetail(r.id)}>Open</Button> },
+    { title: '', key: 'open', fixed: 'right', width: 80, render: (_, r) => <Button type="link" onClick={() => openDetail(r.id)}>Open</Button> },
   ];
   const deliveryColumns = [
     { title: 'Delivery', dataIndex: 'delivery_number', render: (v) => <Text strong>{v}</Text> },
@@ -240,10 +266,12 @@ const SalesOrders = () => {
     { title: 'Status', dataIndex: 'status', render: (v) => <ArStatus status={v} kind="delivery" /> },
     { title: 'Invoice', key: 'invoice', render: (_, r) => (r.invoice ? r.invoice.invoice_number : <Text type="secondary">—</Text>) },
     {
-      title: '', key: 'act', render: (_, r) => (
-        <Space>
-          {r.status === 'DISPATCHED' && <Button size="small" onClick={() => openPod(r)}>Confirm delivery</Button>}
-          {r.can_invoice && <Button size="small" type="primary" onClick={() => openInvoice(r)}>Raise invoice</Button>}
+      title: '', key: 'act', fixed: 'right', width: 170, render: (_, r) => (
+        <Space wrap>
+          {canConfirmDelivery && r.status === 'DISPATCHED' && <Button size="small" onClick={() => openPod(r)}>Confirm delivery</Button>}
+          {canBill && r.can_invoice && (r.invoice_block
+            ? <Text type="secondary" style={{ fontSize: 12 }} title={r.invoice_block}>Someone else invoices this</Text>
+            : <Button size="small" type="primary" onClick={() => openInvoice(r)}>Raise invoice</Button>)}
         </Space>
       ),
     },
@@ -253,24 +281,25 @@ const SalesOrders = () => {
     { label: 'Quotations open', value: summary.quotations || 0, sub: inr(summary.quotation_value) },
     { label: 'On credit hold', value: summary.on_hold || 0, sub: inr(summary.on_hold_value), alert: summary.on_hold > 0 },
     { label: 'Orders to deliver', value: summary.to_deliver || 0, sub: inr(summary.to_deliver_value) },
-    { label: 'Deliveries to invoice', value: dSummary.to_invoice || 0, sub: `${inr(dSummary.to_invoice_value)} delivered, not billed`, alert: dSummary.to_invoice > 0 },
-  ];
+    canSeeDeliveries && { label: 'Deliveries to invoice', value: dSummary.to_invoice || 0, sub: `${inr(dSummary.to_invoice_value)} delivered, not billed`, alert: dSummary.to_invoice > 0 },
+  ].filter(Boolean);
 
   const d = detail;
-  const canDispatch = d && ['CONFIRMED', 'PARTIALLY_DELIVERED'].includes(d.status);
+  const canDispatch = canShip && d && ['CONFIRMED', 'PARTIALLY_DELIVERED'].includes(d.status);
   const liveDeliveries = d ? d.deliveries.filter((x) => x.status !== 'CANCELLED') : [];
 
   return (
     <div>
       <ArFlow active={tab === 'deliveries' ? ['delivery'] : ['order', 'credit']} />
+      <ArTasks kinds={['ORDER']} />
       <PageHeader
         icon={<ClipboardList size={24} />}
         title="Sales Orders"
         subtitle="Quotations and sales orders, the credit check on each order, deliveries, and the invoice raised from each delivery"
         actions={[
           <Button key="r" icon={<RefreshCcw size={16} />} onClick={load} loading={loading}>Refresh</Button>,
-          <Button key="n" type="primary" icon={<FilePlus2 size={16} />} onClick={openNew}>New quotation / order</Button>,
-        ]}
+          canQuote && <Button key="n" type="primary" icon={<FilePlus2 size={16} />} onClick={openNew}>{newLabel}</Button>,
+        ].filter(Boolean)}
       />
       <Tiles tiles={tiles} />
       <Card style={card} styles={{ body: { padding: '0 0 8px' } }}>
@@ -288,21 +317,21 @@ const SalesOrders = () => {
                 </>
               ),
             },
-            {
+            canSeeDeliveries && {
               key: 'deliveries', label: `Deliveries${dSummary.in_transit ? ` (${dSummary.in_transit} in transit)` : ''}`,
               children: <Table rowKey="id" loading={loading} columns={deliveryColumns} dataSource={deliveries} scroll={{ x: 'max-content' }} pagination={{ pageSize: 15, hideOnSinglePage: true }} />,
             },
-          ]}
+          ].filter(Boolean)}
         />
       </Card>
 
       {/* New quotation / order */}
       <Drawer
-        open={newOpen} onClose={() => setNewOpen(false)} width={Math.min(940, window.innerWidth)} title="New quotation / sales order" destroyOnClose
+        open={newOpen} onClose={() => setNewOpen(false)} width={Math.min(940, window.innerWidth)} title={canChangeOrder ? 'New quotation / sales order' : 'New quotation'} destroyOnClose
         extra={(
           <Space>
-            <Button loading={busy} onClick={() => saveNew('QUOTATION')}>Save as quotation</Button>
-            <Button type="primary" loading={busy} onClick={() => saveNew('ORDER')}>Confirm as order</Button>
+            <Button type={canChangeOrder ? 'default' : 'primary'} loading={busy} onClick={() => saveNew('QUOTATION')}>Save as quotation</Button>
+            {canChangeOrder && <Button type="primary" loading={busy} onClick={() => saveNew('ORDER')}>Confirm as order</Button>}
           </Space>
         )}
       >
@@ -320,7 +349,9 @@ const SalesOrders = () => {
                   <Select
                     showSearch optionFilterProp="label" placeholder="Choose a customer"
                     options={customers.map((c) => ({ value: c.id, label: `${c.customer_name}${c.status === 'PENDING' ? ' (not verified: quotation only)' : c.status === 'ON_HOLD' ? ' (on hold)' : ''}` }))}
-                    notFoundContent={<Button type="link" onClick={() => navigate('/finance/ar/customers')}>Add the customer first</Button>}
+                    notFoundContent={canAddCustomer
+                      ? <Button type="link" onClick={() => navigate('/finance/ar/customers')}>Add the customer first</Button>
+                      : <Text type="secondary">Not listed? Ask Accounts Receivable to add the customer.</Text>}
                   />
                 </Form.Item>
               </Col>
@@ -332,22 +363,29 @@ const SalesOrders = () => {
                 <Card size="small" title="Items" style={{ borderRadius: 12, marginBottom: 16 }} extra={<Button size="small" icon={<Plus size={14} />} onClick={() => add(blankItem())}>Add item</Button>}>
                   {fields.map((f) => (
                     <Row gutter={8} key={f.key} align="top">
-                      <Col xs={24} md={10}><Form.Item name={[f.name, 'description']} rules={[{ required: true, message: 'Describe the item' }]} style={{ marginBottom: 8 }}><Input placeholder="Item or service" /></Form.Item></Col>
-                      <Col xs={7} md={4}><Form.Item name={[f.name, 'quantity']} rules={[{ required: true, message: 'Qty' }]} style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} min={0.001} placeholder="Qty" /></Form.Item></Col>
-                      <Col xs={8} md={5}><Form.Item name={[f.name, 'rate']} rules={[{ required: true, message: 'Rate' }]} style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} min={0} prefix="₹" placeholder="Rate" /></Form.Item></Col>
-                      <Col xs={6} md={3}><Form.Item name={[f.name, 'gst_percent']} style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} min={0} max={100} suffix="%" placeholder="GST" /></Form.Item></Col>
-                      <Col xs={3} md={2}><Button type="text" danger icon={<Trash2 size={15} />} disabled={fields.length === 1} onClick={() => remove(f.name)} /></Col>
+                      <Col xs={16} md={6}><Form.Item name={[f.name, 'description']} rules={[{ required: true, message: 'Describe the item' }]} style={{ marginBottom: 8 }}><Input placeholder="Item or service" /></Form.Item></Col>
+                      <Col xs={8} md={2}><Form.Item name={[f.name, 'hsn_code']} style={{ marginBottom: 8 }} tooltip="HSN for goods, SAC for services. Used for the HSN summary in the GST register." rules={[{ pattern: /^\d{4,8}$/, message: '4–8 digits' }]}><Input placeholder="HSN/SAC" maxLength={8} /></Form.Item></Col>
+                      <Col xs={6} md={3}><Form.Item name={[f.name, 'quantity']} rules={[{ required: true, message: 'Qty' }]} style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} min={0.001} placeholder="Qty" /></Form.Item></Col>
+                      <Col xs={7} md={4}><Form.Item name={[f.name, 'rate']} rules={[{ required: true, message: 'Rate' }]} style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} min={0} prefix="₹" placeholder="Rate" /></Form.Item></Col>
+                      <Col xs={5} md={3}><Form.Item name={[f.name, 'discount_percent']} style={{ marginBottom: 8 }} tooltip="Above 10% the order needs an approver"><InputNumber style={{ width: '100%' }} min={0} max={99} suffix="% off" placeholder="Disc." /></Form.Item></Col>
+                      <Col xs={4} md={3}><Form.Item name={[f.name, 'gst_percent']} style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} min={0} max={100} suffix="%" placeholder="GST" /></Form.Item></Col>
+                      <Col xs={2} md={2}><Button type="text" danger icon={<Trash2 size={15} />} disabled={fields.length === 1} onClick={() => remove(f.name)} /></Col>
                     </Row>
                   ))}
                   <div style={{ textAlign: 'right' }}>
                     <Text type="secondary">Subtotal {inr(totals.subtotal)} · GST {inr(totals.tax)} · </Text><Text strong>Total {inr(totals.total)}</Text>
+                    <div><Text type="secondary" style={{ fontSize: 12 }}>A discount above 10% on any line puts the order on hold for an approver.</Text></div>
                   </div>
                 </Card>
               )}
             </Form.List>
             <Form.Item name="notes" label="Notes"><Input.TextArea rows={2} /></Form.Item>
           </Form>
-          <Text type="secondary" style={{ fontSize: 12 }}>Confirming as an order runs the credit check. An order over the credit limit, or for a customer with a bill more than 60 days overdue, goes on hold for an approver.</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {canChangeOrder
+              ? 'Confirming as an order runs the credit check. An order over the credit limit, for a customer with a bill more than 60 days overdue, or with a discount above 10%, goes on hold for an approver.'
+              : 'Accounts Receivable confirms your quotation as an order and runs the credit check. You can follow it here through delivery and invoice.'}
+          </Text>
         </Space>
       </Drawer>
 
@@ -357,9 +395,9 @@ const SalesOrders = () => {
         title={d ? <Space>{d.number}<ArStatus status={d.status} /></Space> : ''}
         extra={d && (
           <Space wrap>
-            {['QUOTATION', 'CREDIT_HOLD', 'CONFIRMED'].includes(d.status) && <Button danger onClick={() => askReason({ title: 'Cancel', label: 'Reason', ok: 'Cancel it', run: (reason) => api.post(`/ar/orders/${d.id}/cancel`, { reason }) })}>Cancel</Button>}
-            {d.status === 'QUOTATION' && <Button type="primary" loading={busy} onClick={() => act(() => api.post(`/ar/orders/${d.id}/confirm`, {}))}>Confirm as order</Button>}
-            {d.status === 'CREDIT_HOLD' && <Button loading={busy} onClick={() => act(() => api.post(`/ar/orders/${d.id}/confirm`, {}))}>Run credit check again</Button>}
+            {d.can_cancel && <Button danger onClick={() => askReason({ title: 'Cancel', label: 'Reason', ok: 'Cancel it', run: (reason) => api.post(`/ar/orders/${d.id}/cancel`, { reason }) })}>Cancel</Button>}
+            {canChangeOrder && d.status === 'QUOTATION' && <Button type="primary" loading={busy} onClick={() => act(() => api.post(`/ar/orders/${d.id}/confirm`, {}))}>Confirm as order</Button>}
+            {canChangeOrder && d.status === 'CREDIT_HOLD' && <Button loading={busy} onClick={() => act(() => api.post(`/ar/orders/${d.id}/confirm`, {}))}>Run credit check again</Button>}
             {d.status === 'CREDIT_HOLD' && d.can_release && <Button type="primary" onClick={() => askReason({ title: 'Release from credit hold', label: 'Why is it being released?', ok: 'Release order', run: (note) => api.post(`/ar/orders/${d.id}/release`, { note }) })}>Release hold</Button>}
             {canDispatch && <Button type="primary" icon={<Truck size={15} />} onClick={openDispatch}>Dispatch</Button>}
           </Space>
@@ -368,9 +406,21 @@ const SalesOrders = () => {
         {d && (
           <Space direction="vertical" size={20} style={{ width: '100%' }}>
             {d.customer?.status === 'PENDING' && d.status === 'QUOTATION' && <Alert type="warning" showIcon message={`${d.customer.customer_name} is not verified yet`} description="The quotation can be sent, but it cannot be confirmed as an order until the customer is verified." />}
-            <CreditPanel check={d.status === 'QUOTATION' ? d.credit_preview : d.credit_check} preview={d.status === 'QUOTATION'} />
+            {/* Once an approver has released the hold, the old "failed" result is shown as part of the release note, not as a red alert. */}
+            {!(d.credit_released_at && d.status !== 'CREDIT_HOLD') && <CreditPanel check={d.status === 'QUOTATION' ? d.credit_preview : d.credit_check} preview={d.status === 'QUOTATION'} />}
             {d.status === 'CREDIT_HOLD' && !d.can_release && d.release_block && <Alert type="info" showIcon message={d.release_block} />}
-            {d.credit_released_at && <Alert type="info" showIcon message={`Released from credit hold by ${d.credit_released_by_name || 'an approver'} on ${fmt(d.credit_released_at)}`} description={d.credit_release_note} />}
+            {d.credit_released_at && (
+              <Alert
+                type="info" showIcon
+                message={`Released from credit hold by ${d.credit_released_by_name || 'an approver'} on ${fmt(d.credit_released_at)}`}
+                description={(
+                  <div>
+                    {d.credit_release_note && <div>{d.credit_release_note}</div>}
+                    {d.credit_check?.reasons?.length > 0 && <Text type="secondary" style={{ fontSize: 12 }}>It had been held because: {d.credit_check.reasons.join('; ')}</Text>}
+                  </div>
+                )}
+              />
+            )}
             <Descriptions size="small" column={{ xs: 1, md: 2 }} bordered>
               <Descriptions.Item label="Customer">{d.customer?.customer_name}</Descriptions.Item>
               <Descriptions.Item label="Customer PO">{d.customer_po_number || '—'}</Descriptions.Item>
@@ -385,10 +435,12 @@ const SalesOrders = () => {
               size="small" rowKey="id" pagination={false} dataSource={d.items} title={() => <Text strong>Items</Text>} scroll={{ x: 'max-content' }}
               columns={[
                 { title: 'Item', dataIndex: 'description' },
+                { title: 'HSN / SAC', dataIndex: 'hsn_code', render: (v) => v || <Text type="secondary">—</Text> },
                 { title: 'Ordered', dataIndex: 'quantity', align: 'right', render: Number },
                 { title: 'Delivered', dataIndex: 'delivered_qty', align: 'right', render: Number },
                 { title: 'Invoiced', dataIndex: 'invoiced_qty', align: 'right', render: Number },
                 { title: 'Rate', dataIndex: 'rate', align: 'right', render: inr },
+                { title: 'Discount', dataIndex: 'discount_percent', align: 'right', render: (v) => (Number(v) > 0 ? <Text type={Number(v) > 10 ? 'danger' : undefined}>{Number(v)}%</Text> : '—') },
                 { title: 'GST', dataIndex: 'gst_percent', align: 'right', render: (v) => `${Number(v)}%` },
                 { title: 'Amount', dataIndex: 'amount', align: 'right', render: inr },
               ]}
@@ -405,9 +457,9 @@ const SalesOrders = () => {
                   {
                     title: '', key: 'act', render: (_, r) => (
                       <Space>
-                        {r.status === 'DISPATCHED' && <Button size="small" icon={<PackageCheck size={14} />} onClick={() => openPod(r)}>Confirm delivery</Button>}
-                        {r.status === 'DELIVERED' && !r.invoice_id && <Button size="small" type="primary" onClick={() => openInvoice(r)}>Raise invoice</Button>}
-                        {!r.invoice_id && <Button size="small" type="text" danger onClick={() => askReason({ title: `Cancel delivery ${r.delivery_number}`, label: 'Reason', ok: 'Cancel delivery', run: (reason) => api.post(`/ar/deliveries/${r.id}/cancel`, { reason }) })}>Cancel</Button>}
+                        {canConfirmDelivery && r.status === 'DISPATCHED' && <Button size="small" icon={<PackageCheck size={14} />} onClick={() => openPod(r)}>Confirm delivery</Button>}
+                        {canBill && r.status === 'DELIVERED' && !r.invoice_id && <Button size="small" type="primary" onClick={() => openInvoice(r)}>Raise invoice</Button> /* the window says if someone else must raise it */}
+                        {canConfirmDelivery && !r.invoice_id && <Button size="small" type="text" danger onClick={() => askReason({ title: `Cancel delivery ${r.delivery_number}`, label: 'Reason', ok: 'Cancel delivery', run: (reason) => api.post(`/ar/deliveries/${r.id}/cancel`, { reason }) })}>Cancel</Button>}
                       </Space>
                     ),
                   },
@@ -422,13 +474,13 @@ const SalesOrders = () => {
                   { title: 'Date', dataIndex: 'invoice_date', render: fmt },
                   { title: 'Total', dataIndex: 'total_amount', align: 'right', render: inr },
                   { title: 'Status', dataIndex: 'status', render: (v) => ({ UNPAID: 'Unpaid', PARTIALLY_PAID: 'Partially paid', PAID: 'Paid', CANCELLED: 'Cancelled' }[v] || v) },
-                  { title: '', key: 'go', render: () => <Button type="link" onClick={() => navigate('/finance/ar/customer-invoices')}>Customer invoices</Button> },
-                ]}
+                  canSeeInvoices && { title: '', key: 'go', render: () => <Button type="link" onClick={() => navigate('/finance/ar/customer-invoices')}>Customer invoices</Button> },
+                ].filter(Boolean)}
               />
             )}
             <div>
               <Text strong>History</Text>
-              <Timeline style={{ marginTop: 12 }} items={historyItems(d.history)} />
+              <Timeline style={{ marginTop: 12 }} items={arHistoryItems(d.history)} />
             </div>
           </Space>
         )}
@@ -468,15 +520,16 @@ const SalesOrders = () => {
       </Modal>
 
       {/* Invoice from delivery */}
-      <Modal open={!!invoiceFor} title={`Raise invoice for delivery ${invoiceFor?.delivery?.delivery_number || ''}`} onCancel={() => setInvoiceFor(null)} onOk={raiseInvoice} confirmLoading={busy} okText="Post invoice" width={720} destroyOnClose>
+      <Modal open={!!invoiceFor} title={`Raise invoice for delivery ${invoiceFor?.delivery?.delivery_number || ''}`} onCancel={() => setInvoiceFor(null)} onOk={raiseInvoice} confirmLoading={busy} okText="Post invoice" okButtonProps={{ disabled: !!invoiceFor?.preview?.invoice_block }} width={720} destroyOnClose>
         {invoiceFor && (
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
+            {invoiceFor.preview.invoice_block && <Alert type="warning" showIcon message={invoiceFor.preview.invoice_block} />}
             <Table
               size="small" rowKey="description" pagination={false} dataSource={invoiceFor.preview.lines}
               columns={[
                 { title: 'Item', dataIndex: 'description' },
                 { title: 'Qty delivered', dataIndex: 'quantity', align: 'right' },
-                { title: 'Rate', dataIndex: 'rate', align: 'right', render: inr },
+                { title: 'Rate', dataIndex: 'rate', align: 'right', render: (v, r) => (Number(r.discount_percent) > 0 ? <span title={`List ${inr(r.list_rate)} less ${r.discount_percent}%`}>{inr(v)}</span> : inr(v)) },
                 { title: 'Amount', dataIndex: 'amount', align: 'right', render: inr },
                 { title: 'GST', dataIndex: 'gst_amount', align: 'right', render: (v, r) => `${inr(v)} (${r.gst_percent}%)` },
               ]}
@@ -490,7 +543,7 @@ const SalesOrders = () => {
               <Descriptions.Item label="Due date">{fmt(invoiceFor.preview.due_date)} (from payment terms)</Descriptions.Item>
             </Descriptions>
             <Form form={invoiceForm} layout="vertical">
-              <Form.Item name="invoice_date" label="Invoice date" rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 0, maxWidth: 240 }}><DatePicker style={{ width: '100%' }} format="DD MMM YYYY" /></Form.Item>
+              <Form.Item name="invoice_date" label="Invoice date" rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 0, maxWidth: 240 }}><DatePicker style={{ width: '100%' }} format="DD MMM YYYY" onChange={previewForDate} disabledDate={(dd) => dd && dd.isAfter(dayjs(), 'day')} /></Form.Item>
             </Form>
             <Card size="small" title="Accounting entry that will be posted" style={{ borderRadius: 12 }}><JournalLines lines={invoiceFor.preview.journal} /></Card>
             <Text type="secondary" style={{ fontSize: 12 }}>The invoice number comes from the running series. Only the delivered quantities are billed.</Text>

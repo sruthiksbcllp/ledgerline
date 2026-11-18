@@ -64,12 +64,29 @@ const APPROVAL_LIMITS = {
 /**
  * section -> { view, add, edit, delete }
  * checkPermission maps CREATE->add and APPROVE->edit.
+ *
+ * Accounts Receivable is split by order-to-cash step, so each login gets the step that mirrors its
+ * AP job (routes/ar.routes.js):
+ *   AR_CUSTOMER - customers (step 1). Verifying a customer needs view plus an approval limit.
+ *   AR_ORDER    - quotations, sales orders, credit check (steps 2-3). Releasing a credit hold needs
+ *                 view plus an approval limit covering the order (Manager / Finance / Director).
+ *   AR_DELIVERY - dispatch and proof of delivery (step 4), done by Warehouse as it does GRNs.
+ *   AR          - customer invoices, receipts, collections, accounting entries (steps 5-9).
+ *   AR_APPROVE  - decides AR items within the person's limit: credit notes (approval limit), write-offs
+ *                 (write-off limit), credit-loss provision and AR close sign-off (Finance / Director).
+ *                 The controller always checks the limit and that the requester is someone else.
+ *   R2R         - record to report on the ledger: view the GL, trial balance and statements; add =
+ *                 prepare manual journals, reconciliations and close steps; edit = approve / review.
  */
 const PERMISSIONS = {
   ADMIN: { '*': { view: true, add: true, edit: true, delete: true } },
   REQUESTER: {
     PR: { view: true, add: true, edit: true, delete: false },
     SES: { view: true, add: true, edit: false, delete: false },
+    // AR mirror of raising a requisition: looks customers up and raises quotations, seeing only their
+    // own (config/dataAccess.js). Accounts Receivable confirms a quotation as an order (AR_ORDER edit).
+    AR_CUSTOMER: { view: true, add: false, edit: false, delete: false },
+    AR_ORDER: { view: true, add: true, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   PROCUREMENT: {
@@ -78,11 +95,18 @@ const PERMISSIONS = {
     PO: { view: true, add: true, edit: true, delete: false },
     SES: { view: true, add: true, edit: false, delete: false },
     VENDOR: { view: true, add: true, edit: true, delete: false },
+    // Read-only customers, e.g. to spot a vendor that is also a customer
+    AR_CUSTOMER: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   MANAGER: {
     PR: { view: true, add: false, edit: true, delete: false },
     SES: { view: true, add: false, edit: true, delete: false },
+    // Approves within ₹1,00,000, as for requisitions: verifies customers and releases credit holds
+    AR_CUSTOMER: { view: true, add: false, edit: false, delete: false },
+    AR_ORDER: { view: true, add: false, edit: false, delete: false },
+    AR_DELIVERY: { view: true, add: false, edit: false, delete: false },
+    AR_APPROVE: { view: true, add: false, edit: false, delete: false }, // credit notes up to ₹1,00,000
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   DIRECTOR_CFO: {
@@ -90,19 +114,31 @@ const PERMISSIONS = {
     PO: { view: true, add: false, edit: true, delete: false },
     SES: { view: true, add: false, edit: true, delete: false },
     PAYMENT: { view: true, add: false, edit: true, delete: false },
+    // Verifies customers and releases credit holds with no ceiling; puts customers on hold and takes them off
+    AR_CUSTOMER: { view: true, add: false, edit: true, delete: false },
+    AR_ORDER: { view: true, add: false, edit: false, delete: false },
+    AR_DELIVERY: { view: true, add: false, edit: false, delete: false },
     AR: { view: true, add: false, edit: false, delete: false }, // read-only receivables for the AR & AP dashboard (config/dataAccess.js AR scope)
+    // Approves credit notes and write-offs with no ceiling, the credit-loss provision, signs off the AR close
+    AR_APPROVE: { view: true, add: false, edit: false, delete: false },
+    R2R: { view: true, add: false, edit: true, delete: false }, // approves manual journals, reviews reconciliations, closes the period
     REPORT: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   COMPLIANCE: {
     // Onboards vendors (Add Vendor) and verifies their submitted details (Vendor Master → Approve)
     VENDOR: { view: true, add: true, edit: true, delete: false },
+    // Reviews customers' GSTIN / PAN and their history, read-only
+    AR_CUSTOMER: { view: true, add: false, edit: false, delete: false },
     AUDIT: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   WAREHOUSE: {
     PO: { view: true, add: false, edit: false, delete: false },
     GRN: { view: true, add: true, edit: true, delete: false },
+    // Outward goods, as GRN is inward: dispatches against sales orders and records proof of delivery
+    AR_ORDER: { view: true, add: false, edit: false, delete: false },
+    AR_DELIVERY: { view: true, add: true, edit: true, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   FINANCE: {
@@ -110,7 +146,13 @@ const PERMISSIONS = {
     FINANCE: { view: true, add: true, edit: true, delete: false },
     SES: { view: true, add: false, edit: true, delete: false },
     PAYMENT: { view: true, add: false, edit: true, delete: false },
+    AR_CUSTOMER: { view: true, add: true, edit: true, delete: false },
+    AR_ORDER: { view: true, add: true, edit: true, delete: false },
+    AR_DELIVERY: { view: true, add: false, edit: false, delete: false },
     AR: { view: true, add: true, edit: true, delete: false },
+    // Credit notes up to ₹5,00,000, write-offs up to ₹1,00,000, credit-loss provision, AR close sign-off
+    AR_APPROVE: { view: true, add: false, edit: false, delete: false },
+    R2R: { view: true, add: true, edit: true, delete: false },
     REPORT: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
@@ -122,10 +164,18 @@ const PERMISSIONS = {
     INVOICE: { view: true, add: true, edit: true, delete: false },
     PAYMENT: { view: true, add: true, edit: false, delete: false },
     VENDOR: { view: true, add: false, edit: false, delete: false },
+    // Read-only customer invoices, e.g. when a vendor is also a customer and balances are netted
+    AR: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
   ACCOUNTS_RECEIVABLE: {
+    AR_CUSTOMER: { view: true, add: true, edit: true, delete: false },
+    AR_ORDER: { view: true, add: true, edit: true, delete: false },
+    // Sees deliveries to invoice them; Warehouse records dispatch and proof of delivery (as AP cannot make GRNs)
+    AR_DELIVERY: { view: true, add: false, edit: false, delete: false },
     AR: { view: true, add: true, edit: true, delete: false },
+    // Prepares manual journals, reconciliations and close steps; never approves its own
+    R2R: { view: true, add: true, edit: false, delete: false },
     REPORT: { view: true, add: false, edit: false, delete: false },
     DASHBOARD: { view: true, add: false, edit: false, delete: false }
   },
@@ -133,7 +183,11 @@ const PERMISSIONS = {
     DASHBOARD: { view: true, add: false, edit: false, delete: false },
     REPORT: { view: true, add: false, edit: false, delete: false },
     PR: { view: true, add: false, edit: false, delete: false },
+    AR_CUSTOMER: { view: true, add: false, edit: false, delete: false },
+    AR_ORDER: { view: true, add: false, edit: false, delete: false },
+    AR_DELIVERY: { view: true, add: false, edit: false, delete: false },
     AR: { view: true, add: false, edit: false, delete: false },
+    R2R: { view: true, add: false, edit: false, delete: false }, // reads the ledger, trial balance and statements
     FINANCE: { view: true, add: false, edit: false, delete: false }
   },
   VENDOR: {

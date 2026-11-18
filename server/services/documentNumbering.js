@@ -33,6 +33,11 @@ const DEFAULTS = {
   SALES_ORDER:    { prefix: 'SO', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
   SALES_DELIVERY: { prefix: 'DN', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
   SALES_INVOICE:  { prefix: 'SI', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  // Accounts Receivable: customer code, credit note, bad-debt write-off; Record to Report: manual journal
+  AR_CUSTOMER:    { prefix: 'CUS', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  CREDIT_NOTE:    { prefix: 'CN', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  AR_WRITE_OFF:   { prefix: 'WO', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
+  MANUAL_JOURNAL: { prefix: 'MJ', separator: '-', padding: 4, fy_format: 'YYYY', fy_start_month: 1 },
 };
 
 /**

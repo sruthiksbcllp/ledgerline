@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Button, Card, Col, Descriptions, Drawer, Form, Input, InputNumber, Modal, Progress, Row, Segmented, Space, Table, Timeline,
+  Alert, Button, Card, Col, Descriptions, Drawer, Form, Input, InputNumber, Modal, Progress, Row, Segmented, Space, Table, Tag, Timeline,
   Typography, Upload, message,
 } from 'antd';
-import { PauseCircle, PlayCircle, RefreshCcw, ShieldCheck, Sparkles, UserPlus, Users2 } from 'lucide-react';
+import { FileText, PauseCircle, PlayCircle, RefreshCcw, ShieldCheck, Sparkles, UserPlus, Users2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
-import { AI_ACCEPT, checkUploadFile, historyItems } from '../../utils/documentReview';
-import { ArFlow, ArStatus, PageHeader, Tiles } from '../../components/ar/ArShared';
-import { card, errorOf, inr } from '../../utils/arFlow';
+import { AI_ACCEPT, checkUploadFile } from '../../utils/documentReview';
+import { getStoredUser, hasPerm } from '../../utils/session';
+import { ArFlow, ArStatus, ArTasks, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
+import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
 const { Text } = Typography;
 const FILTERS = [
@@ -15,9 +17,16 @@ const FILTERS = [
   { label: 'To verify', value: 'PENDING' },
   { label: 'Active', value: 'ACTIVE' },
   { label: 'On hold', value: 'ON_HOLD' },
+  { label: 'Review due', value: 'REVIEW' },
 ];
 
 const Customers = () => {
+  const navigate = useNavigate();
+  // Who may add and change customers (AR_CUSTOMER section). Verifying needs an approval limit (meta.can_approve).
+  const user = getStoredUser();
+  const canSeeInvoices = hasPerm(user, 'AR', 'VIEW');
+  const canAdd = hasPerm(user, 'AR_CUSTOMER', 'ADD');
+  const canChange = hasPerm(user, 'AR_CUSTOMER', 'EDIT');
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({});
   const [loading, setLoading] = useState(false);
@@ -46,7 +55,11 @@ const Customers = () => {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const visible = useMemo(() => (filter === 'ALL' ? rows : rows.filter((r) => r.status === filter)), [rows, filter]);
+  const visible = useMemo(() => {
+    if (filter === 'ALL') return rows;
+    if (filter === 'REVIEW') return rows.filter((r) => r.review_due);
+    return rows.filter((r) => r.status === filter);
+  }, [rows, filter]);
   const pending = rows.filter((r) => r.status === 'PENDING').length;
   const tiles = [
     { label: 'Customers', value: rows.length, sub: `${rows.filter((r) => r.status === 'ACTIVE').length} active` },
@@ -57,7 +70,9 @@ const Customers = () => {
 
   const openEdit = (customer) => {
     form.resetFields();
-    form.setFieldsValue(customer ? { ...customer, credit_limit: customer.credit_limit === null ? undefined : Number(customer.credit_limit) } : { payment_terms_days: 30 });
+    form.setFieldsValue(customer
+      ? { ...customer, credit_limit: customer.credit_limit === null ? undefined : Number(customer.credit_limit), discount_percent: Number(customer.discount_percent || 0), discount_days: Number(customer.discount_days || 0) }
+      : { payment_terms_days: 30, country: 'India', currency: 'INR', discount_percent: 0, discount_days: 0 });
     setEditing(customer || {});
   };
 
@@ -110,6 +125,7 @@ const Customers = () => {
       message.error(errorOf(e, 'Could not open the customer'));
     }
   };
+  useOpenParam(openDetail);
 
   const act = async (fn, close) => {
     setSaving(true);
@@ -137,13 +153,20 @@ const Customers = () => {
   };
 
   const columns = [
-    { title: 'Customer', dataIndex: 'customer_name', render: (v, r) => <Space direction="vertical" size={0}><Text strong>{v}</Text><Text type="secondary" style={{ fontSize: 12 }}>{r.gst_number || 'No GSTIN'}</Text></Space> },
-    { title: 'Terms', dataIndex: 'payment_terms_days', render: (v) => `${v} days` },
+    {
+      title: 'Customer', dataIndex: 'customer_name', render: (v, r) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Link strong onClick={() => openDetail(r.id)}>{v}</Typography.Link>
+          <Text type="secondary" style={{ fontSize: 12 }}>{[r.customer_code, r.gst_number || 'No GSTIN'].filter(Boolean).join(' · ')}</Text>
+        </Space>
+      ),
+    },
+    { title: 'Terms', dataIndex: 'payment_terms_days', render: (v, r) => (Number(r.discount_percent) > 0 ? `${Number(r.discount_percent)}/${r.discount_days} net ${v}` : `${v} days`) },
     { title: 'Credit limit', dataIndex: 'credit_limit', align: 'right', render: (v) => (v === null ? <Text type="secondary">Not set</Text> : inr(v)) },
     { title: 'Outstanding', dataIndex: 'outstanding', align: 'right', render: (v, r) => <Space direction="vertical" size={0} style={{ alignItems: 'flex-end' }}><Text strong>{inr(v)}</Text>{r.overdue > 0 && <Text type="danger" style={{ fontSize: 12 }}>{inr(r.overdue)} overdue · {r.oldest_overdue_days}d</Text>}</Space> },
     { title: 'Limit used', dataIndex: 'credit_used_percent', width: 150, render: (v) => (v === null ? <Text type="secondary">—</Text> : <Progress percent={Math.min(v, 100)} size="small" status={v > 100 ? 'exception' : 'normal'} format={() => `${v}%`} />) },
-    { title: 'Status', dataIndex: 'status', render: (v) => <ArStatus status={v} /> },
-    { title: '', key: 'open', render: (_, r) => <Button type="link" onClick={() => openDetail(r.id)}>{r.can_verify ? 'Verify' : 'Open'}</Button> },
+    { title: 'Status', dataIndex: 'status', render: (v, r) => <Space size={4}><ArStatus status={v} />{r.review_due && <Tag color="orange">Credit review due</Tag>}</Space> },
+    { title: '', key: 'open', fixed: 'right', width: 90, render: (_, r) => <Button type="link" onClick={() => openDetail(r.id)}>{r.can_verify ? 'Verify' : 'Open'}</Button> },
   ];
 
   const c = detail?.customer;
@@ -153,14 +176,15 @@ const Customers = () => {
   return (
     <div>
       <ArFlow active={['customer']} />
+      <ArTasks kinds={['CUSTOMER']} />
       <PageHeader
         icon={<Users2 size={24} />}
         title="Customers"
         subtitle="Add customers, set payment terms and credit limits, and verify them before orders are confirmed"
         actions={[
           <Button key="r" icon={<RefreshCcw size={16} />} onClick={load} loading={loading}>Refresh</Button>,
-          <Button key="n" type="primary" icon={<UserPlus size={16} />} onClick={() => openEdit(null)}>New customer</Button>,
-        ]}
+          canAdd && <Button key="n" type="primary" icon={<UserPlus size={16} />} onClick={() => openEdit(null)}>New customer</Button>,
+        ].filter(Boolean)}
       />
       <Tiles tiles={tiles} />
       <Card style={card} styles={{ body: { padding: 0 } }} title={<Segmented value={filter} onChange={setFilter} options={FILTERS} />}>
@@ -185,21 +209,28 @@ const Customers = () => {
             />
           )}
           {editing?.id && editing.status === 'ACTIVE' && !meta.can_approve && (
-            <Alert type="warning" showIcon message="Changing the name, GSTIN, PAN or credit limit sends the customer back for verification." />
+            <Alert type="warning" showIcon message="Changing the name, GSTIN, PAN, credit limit or payment terms sends the customer back for verification." />
           )}
           <Form form={form} layout="vertical">
             <Row gutter={12}>
-              <Col xs={24} md={12}><Form.Item name="customer_name" label="Customer name" rules={[{ required: true, message: 'Required' }]}><Input /></Form.Item></Col>
+              <Col xs={24} md={12}><Form.Item name="customer_name" label="Legal name" rules={[{ required: true, message: 'Required' }]}><Input /></Form.Item></Col>
+              <Col xs={24} md={12}><Form.Item name="trade_name" label="Trade name"><Input /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="contact_person" label="Contact person"><Input /></Form.Item></Col>
+              <Col xs={24} md={12}><Form.Item name="registration_number" label="Business registration no." extra="CIN / LLPIN, if any"><Input maxLength={50} /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="gst_number" label="GSTIN" extra="Decides IGST or CGST + SGST on invoices"><Input maxLength={15} /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="pan" label="PAN" extra="Taken from the GSTIN if left empty"><Input maxLength={10} /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="email" label="Email (invoices and reminders)"><Input /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="phone" label="Phone"><Input /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="address" label="Billing address"><Input.TextArea rows={2} /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="shipping_address" label="Delivery address"><Input.TextArea rows={2} /></Form.Item></Col>
-              <Col xs={12}><Form.Item name="payment_terms_days" label="Payment terms (days)" rules={[{ required: true, message: 'Required' }]} extra="Sets the due date on each invoice"><InputNumber style={{ width: '100%' }} min={0} max={365} precision={0} /></Form.Item></Col>
-              <Col xs={12}><Form.Item name="credit_limit" label="Credit limit" extra="Leave empty for no limit. An approver confirms it."><InputNumber style={{ width: '100%' }} min={0} prefix="₹" /></Form.Item></Col>
+              <Col xs={12} md={6}><Form.Item name="country" label="Country"><Input /></Form.Item></Col>
+              <Col xs={12} md={6}><Form.Item name="currency" label="Currency"><Input maxLength={3} /></Form.Item></Col>
+              <Col xs={12} md={6}><Form.Item name="payment_terms_days" label="Payment terms (days)" rules={[{ required: true, message: 'Required' }]} extra="Sets the due date"><InputNumber style={{ width: '100%' }} min={0} max={365} precision={0} /></Form.Item></Col>
+              <Col xs={12} md={6}><Form.Item name="credit_limit" label="Credit limit" extra="Empty = no limit"><InputNumber style={{ width: '100%' }} min={0} prefix="₹" /></Form.Item></Col>
+              <Col xs={12}><Form.Item name="discount_percent" label="Early-payment discount %" extra="e.g. 1 for 1% (0 = none)"><InputNumber style={{ width: '100%' }} min={0} max={20} step={0.5} /></Form.Item></Col>
+              <Col xs={12}><Form.Item name="discount_days" label="If paid within (days)" extra="Counted from the invoice date"><InputNumber style={{ width: '100%' }} min={0} max={365} precision={0} /></Form.Item></Col>
             </Row>
+            <Text type="secondary" style={{ fontSize: 12 }}>An approver (Manager, Finance or Director / CFO, within their limit) confirms the credit limit and terms when verifying.</Text>
           </Form>
         </Space>
       </Drawer>
@@ -211,25 +242,31 @@ const Customers = () => {
         title={c ? <Space>{c.customer_name}<ArStatus status={c.status} /></Space> : ''}
         extra={c && (
           <Space>
-            <Button onClick={() => openEdit(c)}>Edit</Button>
-            {c.status === 'ACTIVE' && <Button danger icon={<PauseCircle size={15} />} onClick={() => { holdForm.resetFields(); setHoldOpen(true); }}>Put on hold</Button>}
-            {c.status === 'ON_HOLD' && meta.can_approve && <Button icon={<PlayCircle size={15} />} loading={saving} onClick={() => act(() => api.post(`/ar/customers/${c.id}/hold`, { hold: false }))}>Remove hold</Button>}
+            {canSeeInvoices && c.status !== 'PENDING' && <Button icon={<FileText size={15} />} onClick={() => navigate('/finance/ar/ar-close?tab=statements')}>Statement</Button>}
+            {canChange && <Button onClick={() => openEdit(c)}>Edit</Button>}
+            {canChange && c.status === 'ACTIVE' && <Button danger icon={<PauseCircle size={15} />} onClick={() => { holdForm.resetFields(); setHoldOpen(true); }}>Put on hold</Button>}
+            {canChange && c.status === 'ON_HOLD' && meta.can_approve && <Button icon={<PlayCircle size={15} />} loading={saving} onClick={() => act(() => api.post(`/ar/customers/${c.id}/hold`, { hold: false }))}>Remove hold</Button>}
             {c.status === 'PENDING' && meta.can_approve && <Button type="primary" icon={<ShieldCheck size={15} />} onClick={openVerify}>Verify</Button>}
           </Space>
         )}
       >
         {c && (
           <Space direction="vertical" size={20} style={{ width: '100%' }}>
-            {c.status === 'PENDING' && <Alert type="warning" showIcon message="Waiting for verification" description={meta.can_approve ? 'Check the details and the credit limit, then verify. The person who added the customer cannot verify it.' : 'Finance or the Director / CFO verifies the customer and approves the credit limit.'} />}
+            {c.status === 'PENDING' && <Alert type="warning" showIcon message="Waiting for verification" description={meta.can_approve ? 'Check the details and the credit limit, then verify. The person who added the customer cannot verify it.' : 'An approver (Manager, Finance or Director / CFO) whose approval limit covers the credit limit verifies the customer. No credit limit needs the Director / CFO.'} />}
             {c.status === 'ON_HOLD' && <Alert type="error" showIcon message={`On hold: ${c.hold_reason || 'no reason given'}`} />}
             {c.status === 'REJECTED' && <Alert type="error" showIcon message={`Rejected: ${c.hold_reason || ''}`} />}
-            <Descriptions size="small" column={{ xs: 1, md: 2 }} bordered>
+            <Descriptions size="small" column={{ xs: 1, sm: 1, md: 2, lg: 2, xl: 2, xxl: 2 }} bordered contentStyle={{ overflowWrap: 'normal', wordBreak: 'keep-all' }}>
+              <Descriptions.Item label="Customer code">{c.customer_code || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Trade name">{c.trade_name || '—'}</Descriptions.Item>
               <Descriptions.Item label="GSTIN">{c.gst_number || '—'}</Descriptions.Item>
               <Descriptions.Item label="PAN">{c.pan || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Registration no.">{c.registration_number || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Country / currency">{c.country || 'India'} · {c.currency || 'INR'}</Descriptions.Item>
               <Descriptions.Item label="Contact">{c.contact_person || '—'}</Descriptions.Item>
               <Descriptions.Item label="Email">{c.email || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Payment terms">{c.payment_terms_days} days</Descriptions.Item>
+              <Descriptions.Item label="Payment terms">{c.payment_terms_days} days{Number(c.discount_percent) > 0 ? ` · ${Number(c.discount_percent)}% discount if paid within ${c.discount_days} days` : ''}</Descriptions.Item>
               <Descriptions.Item label="Credit limit">{c.credit_limit === null ? 'Not set' : inr(c.credit_limit)}</Descriptions.Item>
+              <Descriptions.Item label="Next credit review">{c.credit_review_date ? fmt(c.credit_review_date) : '—'}</Descriptions.Item>
             </Descriptions>
             <Card size="small" title="Credit position" style={{ borderRadius: 12 }}>
               <Row gutter={[12, 12]}>
@@ -246,7 +283,7 @@ const Customers = () => {
             />
             <div>
               <Text strong>History</Text>
-              <Timeline style={{ marginTop: 12 }} items={historyItems(detail.history)} />
+              <Timeline style={{ marginTop: 12 }} items={arHistoryItems(detail.history)} />
             </div>
           </Space>
         )}
@@ -261,10 +298,11 @@ const Customers = () => {
       >
         <Form form={verifyForm} layout="vertical">
           <Row gutter={12}>
-            <Col span={12}><Form.Item name="credit_limit" label="Credit limit" extra={s?.suggested ? `Suggested: ${inr(s.suggested)}` : 'Leave empty for no limit'}><InputNumber style={{ width: '100%' }} min={0} prefix="₹" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="credit_limit" label="Credit limit" extra={[s?.suggested ? `Suggested: ${inr(s.suggested)}.` : '', meta.my_limit !== null && meta.my_limit !== undefined ? `You can approve up to ${inr(meta.my_limit)}; no limit needs the Director / CFO.` : 'Leave empty for no limit.'].filter(Boolean).join(' ')}><InputNumber style={{ width: '100%' }} min={0} prefix="₹" /></Form.Item></Col>
             <Col span={12}><Form.Item name="payment_terms_days" label="Payment terms (days)" rules={[{ required: true, message: 'Required' }]}><InputNumber style={{ width: '100%' }} min={0} max={365} precision={0} /></Form.Item></Col>
           </Row>
-          <Form.Item name="reason" label="Reason (only if rejecting)" rules={[{ required: true, message: 'Give a reason for rejecting' }]}><Input.TextArea rows={2} /></Form.Item>
+          {/* Checked only when Reject is clicked (verify() validates `reason` for reject only), so no required mark. */}
+          <Form.Item name="reason" label="Reason (only if rejecting)" required={false} rules={[{ required: true, message: 'Give a reason for rejecting' }]}><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>
 

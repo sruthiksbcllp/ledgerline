@@ -65,6 +65,9 @@ const ArCustomers = lazy(() => import('./pages/ar/Customers'));
 const ArSalesOrders = lazy(() => import('./pages/ar/SalesOrders'));
 const ArCollections = lazy(() => import('./pages/ar/Collections'));
 const ArAccountingEntry = lazy(() => import('./pages/ar/AccountingEntry'));
+const ArCreditNotes = lazy(() => import('./pages/ar/CreditNotes'));
+const ArCreditLoss = lazy(() => import('./pages/ar/CreditLoss'));
+const ArClose = lazy(() => import('./pages/ar/ArClose'));
 const EmailAccountSettings = lazy(() => import('./pages/EmailAccountSettings'));
 const ArGeneralLedger = lazy(() => import('./pages/ar/GeneralLedger'));
 const ArReconciliations = lazy(() => import('./pages/ar/Reconciliations'));
@@ -193,6 +196,9 @@ function App() {
               <Route path="/finance/ar/customer-invoices" element={<ArCustomerInvoices />} />
               <Route path="/finance/ar/collections" element={<ArCollections />} />
               <Route path="/finance/ar/accounting-entry" element={<ArAccountingEntry />} />
+              <Route path="/finance/ar/credit-notes" element={<ArCreditNotes />} />
+              <Route path="/finance/ar/credit-loss" element={<ArCreditLoss />} />
+              <Route path="/finance/ar/ar-close" element={<ArClose />} />
               <Route path="/finance/ap/ai-invoices" element={<ApInvoiceAutomation />} />
               <Route path="/settings/email-account" element={<EmailAccountSettings />} />
               <Route path="/finance/ar/general-ledger" element={<ArGeneralLedger />} />

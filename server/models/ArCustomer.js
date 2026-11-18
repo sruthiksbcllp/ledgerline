@@ -26,7 +26,17 @@ module.exports = (sequelize, DataTypes) => {
     hold_reason: { type: DataTypes.STRING(255), allowNull: true },
     verified_by: { type: DataTypes.INTEGER, allowNull: true },
     verified_at: { type: DataTypes.DATE, allowNull: true },
-    created_by: { type: DataTypes.INTEGER, allowNull: true }
+    created_by: { type: DataTypes.INTEGER, allowNull: true },
+    // Customer master (FDS section 3, mirrored from the vendor master)
+    customer_code: { type: DataTypes.STRING(30), allowNull: true },
+    trade_name: { type: DataTypes.STRING(255), allowNull: true },
+    country: { type: DataTypes.STRING(60), allowNull: false, defaultValue: 'India' },
+    currency: { type: DataTypes.STRING(3), allowNull: false, defaultValue: 'INR' },
+    registration_number: { type: DataTypes.STRING(50), allowNull: true }, // CIN / LLPIN / business registration
+    credit_review_date: { type: DataTypes.DATEONLY, allowNull: true }, // next credit review (blueprint step 1)
+    // Early-payment terms, e.g. 1 % if paid within 10 days (blueprint step 7)
+    discount_percent: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 0 },
+    discount_days: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
   }, {
     sequelize,
     modelName: 'ArCustomer',

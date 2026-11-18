@@ -10,6 +10,13 @@ const EVENTS = [
   { value: 'AR_INVOICE', label: 'Customer invoice', color: 'blue' },
   { value: 'AR_RECEIPT', label: 'Receipt', color: 'green' },
   { value: 'AR_INVOICE_CANCEL', label: 'Invoice cancelled', color: 'default' },
+  { value: 'AR_CREDIT_NOTE', label: 'Credit note', color: 'orange' },
+  { value: 'AR_UNAPPLIED_CASH', label: 'Payment on account (unapplied)', color: 'cyan' },
+  { value: 'AR_UNAPPLIED_APPLIED', label: 'Unapplied cash applied', color: 'cyan' },
+  { value: 'AR_ECL_TOP_UP', label: 'Credit-loss provision', color: 'purple' },
+  { value: 'AR_ECL_RELEASE', label: 'Credit-loss release', color: 'purple' },
+  { value: 'AR_WRITE_OFF', label: 'Write-off', color: 'red' },
+  { value: 'AR_WRITE_OFF_RECOVERY', label: 'Write-off recovery', color: 'gold' },
 ];
 const eventOf = (v) => EVENTS.find((e) => e.value === v) || { label: v, color: 'default' };
 
@@ -51,18 +58,23 @@ const AccountingEntry = () => {
 
   return (
     <div>
-      <ArFlow active={['entry', 'gl']} />
+      <ArFlow active={['gl']} />
       <PageHeader
         icon={<BookOpenCheck size={24} />}
         title="AR Accounting Entries"
-        subtitle="The journal posted to the general ledger for every customer invoice, receipt and cancellation. Nobody keys these."
+        subtitle="The journal posted to the general ledger for every customer invoice, receipt, credit note, unapplied payment, credit-loss provision and write-off. Nobody keys these."
         actions={[<Button key="r" icon={<RefreshCcw size={16} />} onClick={load} loading={loading}>Refresh</Button>]}
       />
       {tie && (
         <Alert
-          style={{ marginBottom: 16 }} showIcon type={tie.ties ? 'success' : 'warning'}
+          style={{ marginBottom: 16 }} showIcon type={tie.ties && tie.unapplied_ties !== false ? 'success' : 'warning'}
           message={tie.ties ? 'Receivables in the ledger equal the customer ledger' : `Receivables in the ledger differ from the customer ledger by ${inr(tie.difference)}`}
-          description={`Accounts receivable in the general ledger: ${inr(tie.gl_receivables)} · Outstanding on open customer invoices: ${inr(tie.customer_ledger)}`}
+          description={(
+            <Space direction="vertical" size={0}>
+              <span>Accounts receivable (1100) in the general ledger: {inr(tie.gl_receivables)} · Outstanding on open customer invoices: {inr(tie.customer_ledger)}</span>
+              {tie.gl_unapplied !== undefined && <span>Unapplied cash (2060) in the ledger: {inr(tie.gl_unapplied)} · Payments not yet applied: {inr(tie.unapplied_ledger)}{tie.unapplied_ties ? '' : ` · difference ${inr(tie.unapplied_difference)}`}</span>}
+            </Space>
+          )}
         />
       )}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>

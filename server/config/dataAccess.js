@@ -50,6 +50,12 @@ const READ_SCOPES = {
   RFQ: {
     PROCUREMENT: 'all', FINANCE: 'all', DIRECTOR_CFO: 'all', COMPLIANCE: 'all', MANAGEMENT: 'all'
   },
+  // Quotations and sales orders. A Requester (own) sees only the quotations they raised, as with
+  // requisitions; the roles that confirm, approve, deliver or report on orders see them all.
+  AR_ORDER: {
+    REQUESTER: 'own', MANAGER: 'all', DIRECTOR_CFO: 'all', WAREHOUSE: 'all', FINANCE: 'all',
+    ACCOUNTS_RECEIVABLE: 'all', MANAGEMENT: 'all'
+  },
   // Customer invoices, receipts, reminders
   AR: {
     ACCOUNTS_RECEIVABLE: 'all', FINANCE: 'all', DIRECTOR_CFO: 'all', MANAGEMENT: 'all'

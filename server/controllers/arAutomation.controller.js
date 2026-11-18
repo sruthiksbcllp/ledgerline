@@ -8,17 +8,28 @@
 const { Op, fn, col, where: sqlWhere } = require('sequelize');
 const {
   sequelize, ArCustomer, ArInvoice, ArReceipt, ArReminder, ArPromise, ArSalesOrder, ArSalesOrderItem, ArDelivery, ArDeliveryItem,
-  JournalEntry, JournalLine
+  ArCreditNote, ArWriteOff, JournalEntry, JournalLine
 } = require('../models');
 const { buildAdminWhere, getClientId } = require('../utils/tenantFilter');
 const { extractInvoice, checkInvoiceNumbers, normalizeDate, toNumber } = require('../services/invoiceExtraction.service');
 const { ExtractionError, GSTIN_RE } = require('../services/vendorExtraction.service');
 const { recordAudit, documentHistory } = require('../utils/financeAudit');
-const { sendReminder, remindOverdue, stageOf } = require('../services/arReminder.service');
-const { outstandingOf, gstSplit } = require('../services/arCredit.service');
+const { sendReminder, remindOverdue, stageOf, disputedInvoiceIds } = require('../services/arReminder.service');
+const credit = require('../services/arCredit.service');
 const arJournal = require('../services/arJournal.service');
+const arPeriod = require('../services/arPeriod.service');
 
-const STATUS_LABEL = { UNPAID: 'Unpaid', PARTIALLY_PAID: 'Partially Paid', PAID: 'Paid', CANCELLED: 'Cancelled' };
+const { outstandingOf, gstSplit, settledStatus } = credit;
+const STATUS_LABEL = { UNPAID: 'Unpaid', PARTIALLY_PAID: 'Partially Paid', PAID: 'Paid', CANCELLED: 'Cancelled', WRITTEN_OFF: 'Written off' };
+/** Why an invoice with no sales order / delivery was raised (blueprint: invoice against a confirmed delivery). */
+const DIRECT_REASONS = {
+  SERVICE: 'Service billing with no delivery',
+  OPENING_BALANCE: 'Opening balance from the previous system',
+  OUTSIDE_SYSTEM: 'Invoice already issued outside LedgerLine',
+  OTHER: 'Other'
+};
+const IRN_RE = /^[0-9a-f]{64}$/i;
+const EWAY_RE = /^\d{12}$/;
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 const today = () => new Date().toISOString().slice(0, 10);
 const fail = (res, status, message, extra = {}) => res.status(status).json({ success: false, message, ...extra });
@@ -30,9 +41,12 @@ const decorate = (row) => {
   const daysOverdue = open && j.due_date && j.due_date < today()
     ? Math.floor((new Date(today()) - new Date(j.due_date)) / 86400000) : 0;
   const stage = open ? stageOf(j) : null;
+  // Fully settled by a credit note or discount with no cash is "Settled", not "Paid".
+  const label = j.status === 'PAID' && Number(j.amount_received || 0) + Number(j.tds_deducted || 0) <= 0.005 ? 'Settled' : STATUS_LABEL[j.status] || j.status;
   return {
-    ...j, outstanding, overdue: daysOverdue > 0, days_overdue: daysOverdue, status_label: STATUS_LABEL[j.status] || j.status,
-    reminder_stage: stage?.stage || null, reminder_stage_label: stage?.label || null
+    ...j, outstanding, overdue: daysOverdue > 0, days_overdue: daysOverdue, status_label: label,
+    reminder_stage: stage?.stage || null, reminder_stage_label: stage?.label || null,
+    no_delivery: !j.delivery_id, direct_reason_label: j.direct_reason ? (DIRECT_REASONS[j.direct_reason.split(':')[0]] || j.direct_reason) : null
   };
 };
 
@@ -79,12 +93,39 @@ async function reviewInvoice(req, body) {
     tax_rate_percent: toNumber(body.tax_rate_percent),
     total_amount: toNumber(body.total_amount),
     amount_received: toNumber(body.amount_received) ?? 0,
-    notes: body.notes ? String(body.notes) : null
+    notes: body.notes ? String(body.notes) : null,
+    direct_reason: body.direct_reason ? String(body.direct_reason).trim().slice(0, 255) : null,
+    irn: body.irn ? String(body.irn).trim() : null,
+    irn_ack_number: body.irn_ack_number ? String(body.irn_ack_number).trim().slice(0, 30) : null,
+    irn_ack_date: normalizeDate(body.irn_ack_date),
+    eway_bill_number: body.eway_bill_number ? String(body.eway_bill_number).replace(/\s/g, '') : null
   };
   const existing = data.customer_id ? await ArCustomer.findOne({ where: { ...tenantWhere, id: data.customer_id } }) : null;
   const checks = checkInvoiceNumbers({ ...data, party_name: existing?.customer_name || data.customer.customer_name, line_items: [] });
   const add = (field, severity, message) => checks.push({ field, severity, message });
-  if (data.customer_id && !existing) add('customer_id', 'error', 'Customer not found in your company');
+  // Customers are added and verified in Customers (maker-checker); an invoice cannot create one.
+  if (!data.customer_id) add('customer_id', 'error', 'Choose a customer. A new customer is added in Accounts Receivable → Customers and verified there first.');
+  else if (!existing) add('customer_id', 'error', 'Customer not found in your company');
+  else if (existing.status === 'PENDING') add('customer_id', 'error', `${existing.customer_name} is not verified yet. Have the customer verified in Customers before invoicing.`);
+  else if (existing.status === 'REJECTED') add('customer_id', 'error', `${existing.customer_name} was rejected at verification and cannot be invoiced`);
+  else if (existing.status === 'ON_HOLD') add('customer_id', 'error', `${existing.customer_name} is on hold${existing.hold_reason ? `: ${existing.hold_reason}` : ''}. Finance must remove the hold first.`);
+  // An invoice with no sales order or delivery must say why.
+  const reasonKey = data.direct_reason ? data.direct_reason.split(':')[0] : null;
+  if (!data.direct_reason) add('direct_reason', 'error', 'Say why this invoice has no sales order or delivery (service billing, opening balance, issued outside LedgerLine, or other)');
+  else if (!DIRECT_REASONS[reasonKey]) add('direct_reason', 'error', 'Choose a reason for the invoice without a delivery');
+  else if (reasonKey === 'OTHER' && data.direct_reason.length < 8) add('direct_reason', 'error', 'Describe the other reason');
+  if (data.invoice_date && data.invoice_date > today()) add('invoice_date', 'error', 'The invoice date cannot be in the future');
+  if (data.invoice_date) {
+    const locked = await arPeriod.lockMessage(existing?.client_id || getClientId(req), data.invoice_date);
+    if (locked) add('invoice_date', 'error', locked);
+  }
+  if (data.irn && !IRN_RE.test(data.irn)) add('irn', 'error', 'The IRN is 64 characters (letters a-f and digits) from the e-invoice portal');
+  if (data.eway_bill_number && !EWAY_RE.test(data.eway_bill_number)) add('eway_bill_number', 'error', 'The e-way bill number is 12 digits');
+  // The credit check runs as a warning: the invoice may already have been issued.
+  if (existing && existing.status === 'ACTIVE' && data.total_amount) {
+    const result = await credit.check(existing, { client_id: existing.client_id, id: null, total_amount: data.total_amount, items: [] }).catch(() => null);
+    if (result && !result.passed) add('credit', 'warning', `Credit check: ${result.reasons.join('; ')}`);
+  }
   if (data.customer.gst_number && !GSTIN_RE.test(data.customer.gst_number)) add('customer.gst_number', 'warning', 'Customer GSTIN does not look valid');
   if (data.customer.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.customer.email)) add('customer.email', 'warning', 'Customer email does not look valid');
   if (data.amount_received < 0) add('amount_received', 'error', 'Amount received cannot be negative');
@@ -132,21 +173,8 @@ exports.create = async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return fail(res, 400, 'Select a company before recording customer invoices');
   try {
-    const { invoice, customer, createdCustomer } = await sequelize.transaction(async (transaction) => {
-      let cust = existing;
-      let created = false;
-      if (!cust) {
-        cust = await ArCustomer.findOne({
-          where: data.customer.gst_number
-            ? { client_id: clientId, gst_number: data.customer.gst_number }
-            : { client_id: clientId, [Op.and]: [sqlWhere(fn('LOWER', col('customer_name')), data.customer.customer_name.toLowerCase())] },
-          transaction
-        });
-        if (!cust) {
-          cust = await ArCustomer.create({ client_id: clientId, ...data.customer, created_by: req.user.id }, { transaction });
-          created = true;
-        }
-      }
+    const { invoice } = await sequelize.transaction(async (transaction) => {
+      const cust = existing;
       const subtotal = data.subtotal ?? round2(data.total_amount - data.tax_amount);
       const split = await gstSplit(clientId, cust.gst_number, data.tax_amount);
       // No due date given: the customer's payment terms decide it.
@@ -159,7 +187,8 @@ exports.create = async (req, res) => {
         total_amount: round2(subtotal + data.tax_amount), amount_received: 0, status: 'UNPAID', notes: data.notes,
         source: req.body.source === 'AI_EXTRACTED' ? 'AI_EXTRACTED' : 'MANUAL',
         source_file_name: req.body.source_file_name ? String(req.body.source_file_name).slice(0, 255) : null,
-        created_by: req.user.id
+        direct_reason: data.direct_reason, irn: data.irn, irn_ack_number: data.irn_ack_number, irn_ack_date: data.irn_ack_date,
+        eway_bill_number: data.eway_bill_number, created_by: req.user.id
       }, { transaction });
       if (data.amount_received > 0) {
         await ArReceipt.create({
@@ -170,19 +199,16 @@ exports.create = async (req, res) => {
         const received = round2(data.amount_received);
         await inv.update({ amount_received: received, status: received >= Number(inv.total_amount) ? 'PAID' : 'PARTIALLY_PAID' }, { transaction });
       }
-      return { invoice: inv, customer: cust, createdCustomer: created };
+      return { invoice: inv };
     });
     // Accounting entry: Dr Receivable, Cr Sales and Output GST (and the receipt, if one came with it).
     await arJournal.safely(`invoice ${invoice.id}`, async () => {
       await arJournal.postInvoice(invoice.id);
       for (const r of await ArReceipt.findAll({ where: { invoice_id: invoice.id }, attributes: ['id'] })) await arJournal.postReceipt(r.id);
     });
-    if (createdCustomer) {
-      await recordAudit(req, { module: 'AR', entityType: 'AR_CUSTOMER', entityId: customer.id, action: 'AR_CUSTOMER_CREATED', after: customer });
-    }
     await recordAudit(req, {
       module: 'AR', entityType: 'AR_INVOICE', entityId: invoice.id, action: 'AR_INVOICE_POSTED', after: invoice,
-      note: `${invoice.source === 'AI_EXTRACTED' ? 'Extracted by AI, reviewed and posted' : 'Entered manually'}${data.amount_received > 0 ? `; ${data.amount_received} received` : ''}`
+      note: `${invoice.source === 'AI_EXTRACTED' ? 'Extracted by AI, reviewed and posted' : 'Entered manually'}; no delivery: ${DIRECT_REASONS[data.direct_reason.split(':')[0]] || data.direct_reason}${data.amount_received > 0 ? `; ${data.amount_received} received` : ''}`
     });
     return res.status(201).json({ success: true, message: 'Customer invoice posted', data: decorate(invoice), checks });
   } catch (error) {
@@ -200,7 +226,8 @@ exports.list = async (req, res) => {
     order: [['invoice_date', 'DESC'], ['id', 'DESC']],
     limit: 1000
   });
-  const data = rows.map(decorate);
+  const disputed = await disputedInvoiceIds(where.client_id || null);
+  const data = rows.map((r) => ({ ...decorate(r), in_dispute: disputed.has(r.id) }));
   const open = data.filter((r) => ['UNPAID', 'PARTIALLY_PAID'].includes(r.status));
   return res.json({
     success: true,
@@ -228,11 +255,14 @@ exports.detail = async (req, res) => {
       { model: ArReceipt, as: 'receipts' },
       { model: ArReminder, as: 'reminders' },
       { model: ArPromise, as: 'promises' },
-      { model: ArSalesOrder, as: 'salesOrder', attributes: ['id', 'order_number'], required: false }
+      { model: ArSalesOrder, as: 'salesOrder', attributes: ['id', 'order_number'], required: false },
+      { model: ArCreditNote, as: 'creditNotes', required: false },
+      { model: ArWriteOff, as: 'writeOffs', required: false }
     ],
     order: [[{ model: ArReceipt, as: 'receipts' }, 'id', 'ASC'], [{ model: ArReminder, as: 'reminders' }, 'id', 'DESC'], [{ model: ArPromise, as: 'promises' }, 'id', 'DESC']]
   });
   if (!invoice) return fail(res, 404, 'Invoice not found');
+  const ids = (list) => (list.length ? list.map((x) => x.id) : 0);
   const [history, journals] = await Promise.all([
     documentHistory(tenantWhere, 'AR_INVOICE', invoice.id),
     JournalEntry.findAll({
@@ -240,14 +270,36 @@ exports.detail = async (req, res) => {
         client_id: invoice.client_id,
         [Op.or]: [
           { source_module: 'AR_INVOICE', source_id: invoice.id },
-          { source_module: 'AR_RECEIPT', source_id: invoice.receipts.length ? invoice.receipts.map((r) => r.id) : 0 }
+          { source_module: 'AR_RECEIPT', source_id: ids(invoice.receipts) },
+          { source_module: 'AR_CREDIT_NOTE', source_id: ids(invoice.creditNotes) },
+          { source_module: 'AR_WRITE_OFF', source_id: ids(invoice.writeOffs) }
         ]
       },
       include: [{ model: JournalLine, as: 'lines' }],
       order: [['id', 'ASC'], [{ model: JournalLine, as: 'lines' }, 'line_no', 'ASC']]
     })
   ]);
-  return res.json({ success: true, data: { ...decorate(invoice), history, journals } });
+  const inDispute = invoice.creditNotes.some((c) => c.status === 'PENDING_APPROVAL');
+  return res.json({ success: true, data: { ...decorate(invoice), in_dispute: inDispute, history, journals } });
+};
+
+/** e-invoice details from the IRP (IRN, acknowledgement) and the e-way bill, entered after the event. */
+exports.updateEinvoice = async (req, res) => {
+  const invoice = await ArInvoice.findOne({ where: { ...buildAdminWhere(req), id: req.params.id } });
+  if (!invoice) return fail(res, 404, 'Invoice not found');
+  if (invoice.status === 'CANCELLED') return fail(res, 409, 'This invoice is cancelled');
+  const body = req.body || {};
+  const irn = body.irn ? String(body.irn).trim() : null;
+  const eway = body.eway_bill_number ? String(body.eway_bill_number).replace(/\s/g, '') : null;
+  if (irn && !IRN_RE.test(irn)) return fail(res, 422, 'The IRN is 64 characters (letters a-f and digits) from the e-invoice portal');
+  if (eway && !EWAY_RE.test(eway)) return fail(res, 422, 'The e-way bill number is 12 digits');
+  const before = invoice.toJSON();
+  await invoice.update({
+    irn, irn_ack_number: body.irn_ack_number ? String(body.irn_ack_number).trim().slice(0, 30) : null,
+    irn_ack_date: normalizeDate(body.irn_ack_date), eway_bill_number: eway
+  });
+  await recordAudit(req, { module: 'AR', entityType: 'AR_INVOICE', entityId: invoice.id, action: 'AR_EINVOICE_UPDATED', before, after: invoice, note: irn ? 'IRN recorded' : 'e-invoice details cleared' });
+  return res.json({ success: true, message: 'e-invoice details saved', data: decorate(invoice) });
 };
 
 exports.recordReceipt = async (req, res) => {
@@ -257,11 +309,20 @@ exports.recordReceipt = async (req, res) => {
   if (amount < 0 || tds < 0) return fail(res, 400, 'Amounts cannot be negative');
   if (!(amount > 0) && !(tds > 0)) return fail(res, 400, 'Enter an amount greater than zero');
   const receivedDate = normalizeDate(req.body?.received_date) || today();
+  if (receivedDate > today()) return fail(res, 422, 'The receipt date cannot be in the future');
+  if (!req.body?.confirm_duplicate_reference) {
+    // Same check as Collections → Receive payment: one bank reference is one payment.
+    const scope = await ArInvoice.findOne({ where: { ...buildAdminWhere(req), id: req.params.id }, attributes: ['client_id'] });
+    const dup = scope ? await require('./arCollections.controller').duplicateReferenceMessage(scope.client_id, req.body?.payment_mode, req.body?.reference) : null;
+    if (dup) return res.status(409).json({ success: false, message: dup, code: 'DUPLICATE_REFERENCE' });
+  }
   try {
     const result = await sequelize.transaction(async (transaction) => {
       const invoice = await ArInvoice.findOne({ where: { ...buildAdminWhere(req), id: req.params.id }, transaction, lock: transaction.LOCK.UPDATE });
       if (!invoice) return { status: 404, message: 'Invoice not found' };
       if (!['UNPAID', 'PARTIALLY_PAID'].includes(invoice.status)) return { status: 409, message: `This invoice is ${STATUS_LABEL[invoice.status]}; no payment is due` };
+      const locked = await arPeriod.lockMessage(invoice.client_id, receivedDate);
+      if (locked) return { status: 423, message: locked };
       const outstanding = outstandingOf(invoice);
       if (round2(amount + tds) > outstanding + 0.005) return { status: 422, message: `Amount${tds ? ' plus TDS' : ''} exceeds the outstanding balance of ${outstanding}` };
       const before = invoice.toJSON();
@@ -271,8 +332,8 @@ exports.recordReceipt = async (req, res) => {
       }, { transaction });
       const received = round2(Number(invoice.amount_received || 0) + amount);
       const tdsTotal = round2(Number(invoice.tds_deducted || 0) + tds);
-      const left = round2(Number(invoice.total_amount) - received - tdsTotal);
-      await invoice.update({ amount_received: received, tds_deducted: tdsTotal, status: left <= 0.005 ? 'PAID' : 'PARTIALLY_PAID' }, { transaction });
+      const next = { amount_received: received, tds_deducted: tdsTotal };
+      await invoice.update({ ...next, status: settledStatus({ ...invoice.toJSON(), ...next }) }, { transaction });
       return { invoice, before, receipt };
     });
     if (result.status) return fail(res, result.status, result.message);
@@ -294,6 +355,11 @@ exports.cancel = async (req, res) => {
   const invoice = await ArInvoice.findOne({ where: { ...buildAdminWhere(req), id: req.params.id } });
   if (!invoice) return fail(res, 404, 'Invoice not found');
   if (Number(invoice.amount_received) > 0 || Number(invoice.tds_deducted) > 0 || invoice.status !== 'UNPAID') return fail(res, 409, 'Only unpaid invoices with no receipts can be cancelled');
+  const pendingCredit = await ArCreditNote.count({ where: { invoice_id: invoice.id, status: 'PENDING_APPROVAL' } });
+  const pendingWriteOff = await ArWriteOff.count({ where: { invoice_id: invoice.id, status: 'PENDING_APPROVAL' } });
+  if (pendingCredit || pendingWriteOff) return fail(res, 409, 'This invoice has a credit note or write-off waiting for a decision. Decide that first.');
+  const lockedMsg = await arPeriod.lockMessage(invoice.client_id, today());
+  if (lockedMsg) return fail(res, 423, lockedMsg);
   const before = invoice.toJSON();
   await sequelize.transaction(async (transaction) => {
     await invoice.update({ status: 'CANCELLED', notes: [invoice.notes, `Cancelled: ${reason}`].filter(Boolean).join('\n') }, { transaction });

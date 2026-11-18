@@ -70,6 +70,15 @@ const startScheduler = () => {
     } catch { /* non-fatal */ }
   });
 
+  // AR approvals escalation (daily at 10am): credit holds, customers to verify, credit notes,
+  // write-offs, credit-loss provisions and AR closes waiting 2+ days are emailed to approvers again
+  const { escalate: escalateArApprovals } = require('../services/arApproval.service');
+  cron.schedule('0 10 * * *', async () => {
+    try {
+      await executeWithRetry('AR approvals escalation', () => escalateArApprovals());
+    } catch { /* non-fatal */ }
+  });
+
   // Bill inbox: check connected Outlook mailboxes for new vendor bills (every 15 minutes)
   const billInbox = require('../services/billInbox.service');
   cron.schedule('*/15 * * * *', async () => {

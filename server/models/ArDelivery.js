@@ -26,7 +26,8 @@ module.exports = (sequelize, DataTypes) => {
     received_by: { type: DataTypes.STRING(150), allowNull: true },
     delivery_note: { type: DataTypes.STRING(255), allowNull: true },
     invoice_id: { type: DataTypes.INTEGER, allowNull: true },
-    created_by: { type: DataTypes.INTEGER, allowNull: true }
+    created_by: { type: DataTypes.INTEGER, allowNull: true },
+    confirmed_by: { type: DataTypes.INTEGER, allowNull: true } // recorded the proof of delivery; may not invoice it
   }, {
     sequelize,
     modelName: 'ArDelivery',

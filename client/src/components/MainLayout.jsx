@@ -390,7 +390,10 @@ const MainLayout = ({ children }) => {
         { key: '/finance/ar/customers', icon: <Users2 size={16} />, label: 'Customers', hidden: !canSeeArFlow },
         { key: '/finance/ar/sales-orders', icon: <ClipboardList size={16} />, label: 'Sales Orders', hidden: !canSeeArFlow },
         { key: '/finance/ar/customer-invoices', icon: <HandCoins size={16} />, label: 'Customer Invoices', hidden: !canSeeArInvoices },
+        { key: '/finance/ar/credit-notes', icon: <ClipboardX size={16} />, label: 'Credit Notes', hidden: !canSeeArFlow },
         { key: '/finance/ar/collections', icon: <WalletCards size={16} />, label: 'Collections', hidden: !canSeeArFlow },
+        { key: '/finance/ar/credit-loss', icon: <BadgePercent size={16} />, label: 'Credit Loss', hidden: !canSeeArFlow },
+        { key: '/finance/ar/ar-close', icon: <Lock size={16} />, label: 'AR Close & Reports', hidden: !canSeeArFlow },
         { key: '/finance/ar/accounting-entry', icon: <ScrollText size={16} />, label: 'AR Accounting Entries', hidden: !canSeeArFlow },
         { key: '/finance/ar/record-to-report', icon: <ScrollText size={16} />, label: 'Record to Report', hidden: !canSeeFinance },
         { key: '/finance/ar/chart-of-accounts', icon: <ListChecks size={16} />, label: 'Chart of Accounts', hidden: !canSeeFinance },
@@ -697,7 +700,7 @@ const MainLayout = ({ children }) => {
               </span>
               <ChevronRight size={14} />
               <span style={{ color: navTextBold, fontWeight: 700, textTransform: location.pathname === '/' || location.pathname === '/dashboard' ? 'none' : 'capitalize', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {location.pathname === '/' || location.pathname === '/dashboard' ? 'AR & AP' : ({ 'ap-accounting-entry': 'AP Journal' }[location.pathname.split('/').pop()] || location.pathname.split('/').pop().replace(/-/g, ' '))}
+                {location.pathname === '/' || location.pathname === '/dashboard' ? 'AR & AP' : ({ 'ap-accounting-entry': 'AP Journal', 'ar-close': 'AR Close & Reports' }[location.pathname.split('/').pop()] || location.pathname.split('/').pop().replace(/-/g, ' '))}
               </span>
             </div>
           </div>

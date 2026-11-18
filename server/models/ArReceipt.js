@@ -18,7 +18,10 @@ module.exports = (sequelize, DataTypes) => {
     notes: { type: DataTypes.TEXT, allowNull: true },
     tds_amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 }, // TDS withheld by the customer on this payment
     payment_group: { type: DataTypes.STRING(40), allowNull: true }, // one customer payment applied to several invoices shares a group
-    created_by: { type: DataTypes.INTEGER, allowNull: true }
+    created_by: { type: DataTypes.INTEGER, allowNull: true },
+    discount_amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 }, // early-payment discount allowed on this payment
+    unapplied_id: { type: DataTypes.INTEGER, allowNull: true }, // applied from unapplied cash, so no new money reached the bank
+    applied_by_ai: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false } // matched from a remittance advice read by AI
   }, {
     sequelize,
     modelName: 'ArReceipt',

@@ -185,6 +185,7 @@ app.use('/api/company-access', require('./routes/companyAccess.routes'));
 app.use('/api/procurement/ses', require('./routes/serviceEntrySheet.routes')); // Service Entry Sheets (service receipts)
 app.use('/api/procurement', procurementRoutes);
 app.use('/api/ar', require('./routes/ar.routes')); // Accounts Receivable: customer invoices, receipts, reminders
+app.use('/api/r2r', require('./routes/r2r.routes')); // Record to Report on the posted ledger: GL, trial balance, statements, close
 app.use('/api/rfqs', require('./routes/rfq.routes')); // CR-P01 RFQ module
 app.use('/api/vendor-emails', require('./routes/vendorEmail.routes')); // admin-approved vendor emails for awarded RFQs
 app.use('/api/oauth/mail', require('./routes/mailOAuth.routes')); // Google/Microsoft mailbox sign-in callback (public)
