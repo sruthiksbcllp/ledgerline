@@ -10,7 +10,7 @@ import api from '../utils/api';
 import { inr } from '../utils/arFlow';
 import { ChecksPanel, DocumentDropzone } from '../components/finance/DocumentReview';
 import { checkUploadFile, markProps } from '../utils/documentReview';
-import { ArFlow, ArStatus, ArTasks, JournalLines, StageTag, arHistoryItems, confirmDuplicateReference } from '../components/ar/ArShared';
+import { ArStatus, ArTasks, JournalLines, StageTag, arHistoryItems, confirmDuplicateReference } from '../components/ar/ArShared';
 import { getStoredUser, hasPerm } from '../utils/session';
 
 const { Text } = Typography;
@@ -412,7 +412,6 @@ const ArCustomerInvoices = () => {
 
   return (
     <div>
-      <ArFlow active={['invoice']} />
       <ArTasks kinds={['CREDIT_NOTE', 'WRITE_OFF']} />
       <Card style={{ ...card, marginBottom: 16 }} styles={{ body: { padding: 20 } }}>
         <Row justify="space-between" align="middle" gutter={[16, 16]}>

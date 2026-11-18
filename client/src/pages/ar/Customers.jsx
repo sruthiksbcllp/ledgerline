@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
 import { AI_ACCEPT, checkUploadFile } from '../../utils/documentReview';
 import { getStoredUser, hasPerm } from '../../utils/session';
-import { ArFlow, ArStatus, ArTasks, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
+import { ArStatus, ArTasks, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
 import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
 const { Text } = Typography;
@@ -175,7 +175,6 @@ const Customers = () => {
 
   return (
     <div>
-      <ArFlow active={['customer']} />
       <ArTasks kinds={['CUSTOMER']} />
       <PageHeader
         icon={<Users2 size={24} />}

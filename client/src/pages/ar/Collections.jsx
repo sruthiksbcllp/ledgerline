@@ -8,7 +8,7 @@ import dayjs from 'dayjs';
 import api from '../../utils/api';
 import { AI_ACCEPT, checkUploadFile } from '../../utils/documentReview';
 import { useExcelExport } from '../../utils/apReports';
-import { ArFlow, ArStatus, PageHeader, StageTag, Tiles, confirmDuplicateReference } from '../../components/ar/ArShared';
+import { ArStatus, PageHeader, StageTag, Tiles, confirmDuplicateReference } from '../../components/ar/ArShared';
 import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 import { getStoredUser, hasPerm } from '../../utils/session';
 
@@ -279,7 +279,6 @@ const Collections = () => {
 
   return (
     <div>
-      <ArFlow active={tab === 'receive' || tab === 'unapplied' ? ['cash'] : ['collections']} />
       <PageHeader
         icon={<PhoneCall size={24} />}
         title="Collections"

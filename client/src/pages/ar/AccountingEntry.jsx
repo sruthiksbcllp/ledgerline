@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Card, Col, DatePicker, Input, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { BookOpenCheck, RefreshCcw } from 'lucide-react';
 import api from '../../utils/api';
-import { ArFlow, JournalLines, PageHeader } from '../../components/ar/ArShared';
+import { JournalLines, PageHeader } from '../../components/ar/ArShared';
 import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
 const { Text } = Typography;
@@ -58,7 +58,6 @@ const AccountingEntry = () => {
 
   return (
     <div>
-      <ArFlow active={['gl']} />
       <PageHeader
         icon={<BookOpenCheck size={24} />}
         title="AR Accounting Entries"

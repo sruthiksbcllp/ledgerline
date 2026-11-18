@@ -9,7 +9,7 @@ import dayjs from 'dayjs';
 import api from '../../utils/api';
 import { useExcelExport } from '../../utils/apReports';
 import { getStoredUser, hasPerm } from '../../utils/session';
-import { ArFlow, ArStatus, ArTasks, PageHeader, Tiles } from '../../components/ar/ArShared';
+import { ArStatus, ArTasks, PageHeader, Tiles } from '../../components/ar/ArShared';
 import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
 const { Text } = Typography;
@@ -240,7 +240,6 @@ const ArClose = () => {
 
   return (
     <div>
-      <ArFlow active={['close']} />
       <PageHeader
         icon={<Lock size={24} />}
         title="AR Close & Reports"

@@ -8,7 +8,7 @@ import { useSearchParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api from '../../utils/api';
 import { getStoredUser, hasPerm } from '../../utils/session';
-import { ArFlow, ArStatus, ArTasks, JournalLines, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
+import { ArStatus, ArTasks, JournalLines, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
 import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
 const { Text, Paragraph } = Typography;
@@ -270,7 +270,6 @@ const CreditLoss = () => {
 
   return (
     <div>
-      <ArFlow active={tab === 'writeoffs' ? ['writeoff'] : ['ecl']} />
       <PageHeader
         icon={<BadgePercent size={24} />}
         title="Credit Loss & Write-offs"

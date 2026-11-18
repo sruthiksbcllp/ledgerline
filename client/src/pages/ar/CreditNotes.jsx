@@ -6,7 +6,7 @@ import {
 import { ClipboardX, FileText, Paperclip, Plus, RefreshCcw } from 'lucide-react';
 import api from '../../utils/api';
 import { getStoredUser, hasPerm } from '../../utils/session';
-import { ArFlow, ArStatus, ArTasks, JournalLines, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
+import { ArStatus, ArTasks, JournalLines, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
 import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
 const { Text } = Typography;
@@ -183,7 +183,6 @@ const CreditNotes = () => {
 
   return (
     <div>
-      <ArFlow active={['dispute']} />
       <PageHeader
         icon={<ClipboardX size={24} />}
         title="Disputes & Credit Notes"

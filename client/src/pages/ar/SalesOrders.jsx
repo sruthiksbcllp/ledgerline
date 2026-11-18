@@ -9,7 +9,7 @@ import dayjs from 'dayjs';
 import api from '../../utils/api';
 import { AI_ACCEPT, checkUploadFile } from '../../utils/documentReview';
 import { getStoredUser, hasPerm } from '../../utils/session';
-import { ArFlow, ArStatus, ArTasks, JournalLines, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
+import { ArStatus, ArTasks, JournalLines, PageHeader, Tiles, arHistoryItems, useOpenParam } from '../../components/ar/ArShared';
 import { card, errorOf, fmt, inr } from '../../utils/arFlow';
 
 const { Text } = Typography;
@@ -290,7 +290,6 @@ const SalesOrders = () => {
 
   return (
     <div>
-      <ArFlow active={tab === 'deliveries' ? ['delivery'] : ['order', 'credit']} />
       <ArTasks kinds={['ORDER']} />
       <PageHeader
         icon={<ClipboardList size={24} />}

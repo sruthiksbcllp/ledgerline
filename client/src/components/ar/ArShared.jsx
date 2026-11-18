@@ -2,40 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Button, Card, Col, List, Modal, Row, Space, Tag, Typography } from 'antd';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../utils/api';
-import { getStoredUser } from '../../utils/session';
-import { canSeePath } from '../../config/rbac';
-import { AR_STEPS, card, inr } from '../../utils/arFlow';
+import { card, inr } from '../../utils/arFlow';
 
 const { Text } = Typography;
-
-/** The nine AR steps as a strip; `active` (step keys) marks the steps this page covers. */
-export const ArFlow = ({ active = [] }) => {
-  const navigate = useNavigate();
-  const role = getStoredUser()?.role;
-  return (
-    <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 18, alignItems: 'center', overflowX: 'auto', whiteSpace: 'nowrap', padding: '0 4px 6px', marginBottom: 10, fontSize: 12.5 }}>
-      {AR_STEPS.map((s) => {
-        const on = active.includes(s.key);
-        const allowed = canSeePath(role, s.path.split('?')[0]);
-        return (
-          <button
-            key={s.key}
-            type="button"
-            onClick={() => allowed && navigate(s.path)}
-            title={`Mirrors in AP: ${s.ap}`}
-            style={{
-              flex: '0 0 auto', padding: '2px 0', border: 'none', background: 'none', cursor: allowed ? 'pointer' : 'default',
-              color: on ? 'var(--color-primary, #4F46E5)' : 'var(--color-text-secondary, #667085)', fontWeight: on ? 700 : 400,
-              borderBottom: `2px solid ${on ? 'var(--color-primary, #4F46E5)' : 'transparent'}`, opacity: allowed ? 1 : 0.6,
-            }}
-          >
-            {s.n}. {s.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-};
 
 export const PageHeader = ({ icon, title, subtitle, actions }) => (
   <Card style={{ ...card, marginBottom: 16 }} styles={{ body: { padding: 20 } }}>
